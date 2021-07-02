@@ -1,0 +1,442 @@
+---
+title: "EQ6_TP2_Q2_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 6, Travaux pratiques 2, Question 2"
+    toc: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+
+
+rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
+gc() 
+
+
+library(lubridate)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(caret)
+library(rlang)
+library(dplyr)
+library(httr)
+library(pROC)
+library(rpart)
+library(rpart.plot)
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import_single_tsv <- function ( file_path_, file_name_  ){
+  
+  full_path_ <- file.path ( file_path_ , file_name_ ) 
+  
+  file_ = read_tsv(full_path_)
+  print(full_path_)
+  return( file_ )
+}
+##=========================================================================================
+
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import.multiple.tsv <- function ( file_path_, pattern_ , skip_value_ )
+{
+  
+  files_names_  = list.files( path = file_path_, 
+                              recursive = FALSE, 
+                              pattern = pattern_
+  )
+  
+  full_path_ = file.path ( file_path_ , files_names_ ) 
+  
+  
+  
+  file_ = full_path_	%>%
+    map(read_tsv, skip = skip_value_ )  %>% 
+    reduce(rbind) 
+  
+  return ( file_ )
+}
+##=========================================================================================
+
+
+
+##=========================================================================================
+##  Function to normalize the columns
+##=========================================================================================
+normalize <- function(x){
+  return ( (x - min(x) ) / ( max(x) - min(x) ))
+}
+##=========================================================================================
+
+
+
+##=========================================================================================
+##  Function to run and/or save the model
+##=========================================================================================
+run_best_model <- function(file_ ){
+  
+  if(!file.exists(file_)) return (NULL)
+  
+  return ( readRDS(file_) )
+  
+}
+
+
+##=========================================================================================
+##  Function to run and/or save the model
+##=========================================================================================
+run_model <- function(file_path_="data", model_method_name_, data.training_,  train_control_pbject_ ){
+  
+  file_name_ = (paste(model_method_name_,'rds',sep ='.'))
+  file_ <- file.path ( file_path_ , file_name_ )
+  
+  
+  
+  if(!file.exists(file_))
+  {
+    #Run Model for first time
+    set.seed(278523)
+    
+    if ("rpart" %in% model_method_name_ ) {
+      grid_ <-  expand.grid(maxdepth = 1:10)
+      model_  = train( Class ~ .,
+                       data = data.training,
+                       method = "rpart2",
+                       trControl = trainControl_,
+                       tuneGrid = grid_
+                       )
+    }
+    
+    if ("knn" %in% model_method_name_ ) {
+      model_  = train( Class ~ .,
+                       data = data.training,
+                       method = "knn",
+                       trControl = trainControl_,
+                       tuneLength = 4)
+                       tuneGrid = expand.grid(k= seq(1,100,by = 2))
+                       #type = "classification"  )
+    }
+    
+    if ("gbm" %in% model_method_name_ ) {
+      grid_ <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                            n.trees = seq(100,1000,by = 100), 
+                            shrinkage = 0.1,
+                            n.minobsinnode = 10
+      )
+      
+      model_  = train(Class ~ . , 
+                      data = data.training,
+                      method = 'gbm',
+                      tuneGrid = grid_,
+                      verbose = FALSE,
+                      trControl = trainControl_,
+                      metric = "ROC"
+                      )
+    }
+    
+    if ( "nnet" %in% model_method_name_  ) {
+      grid_ <- expand.grid(.decay = c(0.5, 0.1), .size = c(5, 6, 7))
+      model_ = train(Class ~ .,
+                     data = data.training,
+                     method = "nnet",
+                     trControl = trainControl_,
+                     preProc = c("center","scale"),
+                     trace = F
+                     )
+    }
+    
+    
+    if ("svmLinear" %in% model_method_name_ ) {
+      model_ = train(Class ~ .,
+                     data = data.training,
+                     method = "svmLinear",
+                     trControl = trainControl_,
+                     preProc = c("center","scale"),
+                     tuneLength = 10
+      )
+    }
+    
+    
+    # Save model
+    print ("Saving model")
+    print(file_)
+    saveRDS(model_, file_)
+    print (paste(file_,"- saved!"))
+    
+  }else{
+    print("Load model from file")
+    model_ = readRDS(file_)
+  }
+  
+  return (model_)
+}
+
+```
+
+# 2 Commercialisation et prévisibilité du succès des produits
+
+## 2.1 Préparer les données
+Dans cette section, nous devions faire un prétraitement avant d'appeler la fonction `train`.
+
+
+```{r preparer}
+ # Load the data
+  INPUT_DATA_FILE_PATH  =  "data"
+  INPUT_DATA_FILE_TYPE  =  "*.tsv"
+  INPUT_FILE_csv_       = "Q2_data.tsv"
+  
+  
+  #data.input = import.multiple.tsv (INPUT_DATA_FILE_PATH, INPUT_DATA_FILE_TYPE, 0) # load multiple cvs files
+  data.input = as_tibble (import_single_tsv(INPUT_DATA_FILE_PATH,INPUT_FILE_csv_))  # load a single cvs file
+  
+  # Inspect the data
+  data.input.head = head(data.input, 10)                             # Display the first 10 rows of input set 
+  #print("First 10 row from the data.txt")
+  #print(data.input.head)
+  
+  
+  count.is.na_ = data.input %>% summarize(na_count = sum(is.na(.)))  # Check out for missing explicit values
+  #print("# of NA values")
+  #print(count.is.na_)
+  
+  data.input = drop_na (data.input)                                  # Drop NA values if exists
+  #str(data.input)                                                    # Check out whether the columns are correct
+  
+  # Switch the characters values to integer'
+  data.input$in01 = ifelse( data.input$in01 == 'white',1,2)
+  data.input$in09 = ifelse( data.input$in09 == 'very low', 1,
+                            ifelse(data.input$in09 == 'low', 2,
+                            ifelse(data.input$in09 == 'med', 3,
+                            ifelse(data.input$in09 == 'sweet', 4, 5)))) # very sweet = 5
+  data.input$in16 = ifelse( data.input$in16 == 'low', 1,
+                            ifelse(data.input$in16 == 'med', 2,
+                            ifelse(data.input$in16 == 'standard', 2, 3))) # high = 3
+  
+  data.input$Class <- factor(data.input$Class)
+  
+  col_to_convert =  str_subset(string = colnames(data.input),
+                               pattern = 'Class',
+                               negate = TRUE)
+  
+  
+  data.input = data.input %>% mutate_at(col_to_convert, as.numeric)
+  
+  
+  
+
+    
+```
+
+Après la préparation, les données montraient `r count.is.na_` donnée manquante.
+
+Voici quelques lignes:
+```{r echo = FALSE}
+data.input.head
+```
+Il est à mentionner que nous avons changé les valeurs de type caractère en entier afin de faciliter l'entrainement.
+
+Les types de colonnes sont corrects, certains sont des entiers et d'autres des nombres naturels ainsi qu'une colonne de type _factor_. Tel qu'illustrer ci contre:
+```{r echo = FALSE}
+str(data.input) 
+```
+
+
+## 2.2 Entraînements
+
+Nous avons choisi deux modèles pour la prédiction de la probabilité de succès d'une classement. Ces deux modèles sont _RPART_ et _Boosted Trees_. De plus, nous avons retiré certaines colonnes qui représentaient une trop grande corrélation entre elles, le cutoff a été établi à .75. Nous avons créé aussi les partitions selon la règle 80:20. 
+
+### Modèle RPART
+
+Pour notre grille de tuples, nous avons utilisé les paramètres suivants pour le modèle _rpart2_ : `expand.grid(maxdepth = 1:10)`
+
+```{r entrainement_rpart}
+
+# too_high   =  findCorrelation(cor(data.input[-18]),cutoff = .75)
+# data.input =  select(data.input,-too_high)
+
+
+# Randomly  split data into training and test set
+set.seed(278523)
+samples_      = data.input$Class %>% createDataPartition(p = 0.8, list = FALSE ) # Apply 80:20 rule
+data.training = data.input[ samples_ ,]
+data.test     = data.input[-samples_ ,]  
+
+
+# # Check out the data split size
+# print("# of rows for data.training")
+# print(nrow(data.training))
+# 
+# print("# of rows for data.test")
+# print(nrow(data.test))
+# 
+# print("# sum of na's for data.training")
+# sum(is.na(data.training))
+# 
+# print("#  sum of na's for data.test")
+# sum(is.na(data.test))
+
+data.training = drop_na (data.training)      # Drop NA values if exists
+#str(data.training)                           # Check out whether the co
+
+data.test = drop_na (data.test)              # Drop NA values if exists
+#str(data.test)                               # Check out whether the co
+
+
+#=========================================================================================
+#                   Compute the Decision Tree (rpart) model
+#=========================================================================================
+  
+  # Set the trainControl object
+  trainControl_ = trainControl(method = "cv",number = 10)
+  
+  # Execute/Get the training model
+  model.rpart =  run_model(INPUT_DATA_FILE_PATH, 'rpart',data.training, trainControl_)
+  
+  # Make predictions on the test data
+  data.predict.rpart = predict(model.rpart , newdata = data.test)
+  data.predict.rpart.prob = predict(model.rpart , newdata = data.test, type = 'prob')
+  
+  confusionMatrix(data.predict.rpart, data.test$Class, positive ='yes')
+  table(data.predict.rpart, data.test$Class)
+  
+
+```
+
+
+### Modèle Boosted Trees
+
+Ici, afin de minimiser le temps de calcul, nous avons limité la validation croisée à 5 plutôt que 10 pour le _rpart_. Pour notre grille de tuples, nous avons utilisé les paramètres suivants pour le modèle _gbm_ :
+
+```{r echo = TRUE, eval = FALSE}
+expand.grid(interaction.depth = c(1, 5, 9), 
+                            n.trees = seq(100,1000,by = 100), 
+                            shrinkage = 0.1,
+                            n.minobsinnode = 10
+```
+
+```{r entrainement_gbm}
+ # Set the trainControl object
+  trainControl_ = trainControl(method = "repeatedcv",number =  5, repeats = 5  , classProbs = TRUE,
+                               summaryFunction = twoClassSummary)
+  
+  model.gbm =  run_model(INPUT_DATA_FILE_PATH, 'gbm',data.training, trainControl_ )
+  
+ 
+  
+  # Make predictions on the test data
+  data.predict.gbm = predict(model.gbm , newdata = data.test)
+  data.predict.gbm.prob = predict(model.gbm , newdata = data.test, type = 'prob')
+  
+  confusionMatrix(data.predict.gbm, data.test$Class, positive = 'yes')
+  table(data.predict.gbm, data.test$Class)
+  
+ 
+```
+
+
+## 2.3 Afficher l’arbre de décision appris
+
+Voici l'arbre de décision suite à l'analyse.
+
+```{r affichage_arbre}
+
+  
+  prp(model.rpart$finalModel,box.palette = "Reds", type = 5, extra = 101,
+      cex = 0.7, min.branch.width = 0.005, split.yshift = 0.5)
+
+```
+
+
+## 2.4 Évaluation de l’entraînement pour chacun des modèles
+
+### 2.4.1 Modèle RPART
+
+La Figure 1 montre la valeur de l'exactitude par rapport à la profondeur de l'arbre dans notre modèle. Nous pouvons constater que l'exactitude du modèle plafone à partir d'une profondeur de `r model.rpart$bestTune$maxdepth`. Ainsi, `r model.rpart$bestTune$maxdepth` est la meilleure valeur pour le paramètre _maxdepth_ (profondeur de l'arbre) ici. Nous obtenons une exactitude de 0.8114 pour ce modèle.
+
+
+```{r analyse4.1}
+    ggplot(data = tibble(maxdepth = model.rpart$results$maxdepth, Accuracy = model.rpart$results$Accuracy),
+           aes(x = maxdepth, y = Accuracy)) +
+          geom_line() + geom_point() +
+          labs(title = "Figure 1. Valeur du l'exactitude selon la valeur de la profondeur de l'arbre")
+```
+
+### Modèle Boosted Trees
+
+La Figure 2 montre la valeur de l'aire sous la courbe ROC par rapport aux paramètres de profondeur de l'arbre (interaction_depth) et le nombre d'arbres (n_tree). Nous pouvons constater que plus l'arbre est profond, plus l'aire sous la courbe ROC est élevée. En effet, nous obtenons de meilleurs résultats avec une profondeur de 9. De plus, dans nos calculs, plus le nombre d'arbres est important plus l'aire sous la courbe ROC augmente. Cependant, nous pouvons réaliser que nous n'avons pas atteint un plateau, il est possible que le paramètre optimal pour le nombre d'arbres soit plus élevé que 1000. Mais pour des raisons de temps de calcul, nous avons limité nos recherches à un maximum de 1000 arbres. Ainsi, avec une profondeur de `r model.gbm$bestTune$interaction.depth` et un nombre d'arbres de `r model.gbm$bestTune$n.tree`, nous obtenons une aire sous la courbe ROC de 0.8795733. 
+
+```{r analyse4.2}
+ggplot(data = tibble(interaction_depth = as.character(model.gbm$results$interaction.depth), n_trees = model.gbm$results$n.trees, 
+                     ROC = model.gbm$results$ROC),
+       aes(x = n_trees, y = ROC, group = interaction_depth, color = interaction_depth)) +
+      geom_line() + geom_point() +
+      labs(title = "Figure 2. Aire sous la courbe ROC selon la valeur de n.tree et interaction.depth")
+```
+
+
+## 2.5 Comparaison des modèles
+
+```{r compare}
+roc.curve.rpart = roc(response = data.test$Class,
+                      predictor = data.predict.rpart.prob[,'yes'],
+                      direction = "<",
+                      levels = levels(data.test$Class))
+  
+  
+ roc.curve.gbm = roc(response = data.test$Class,
+                      predictor = data.predict.gbm.prob[,'yes'],
+                      direction = "<",
+                      levels = levels(data.test$Class))
+```
+
+La Figure 3 présente la comparaison des courbes ROC de chacun des modèles. Nous pouvons constater rapidement que le modèle _Bossted trees_ (gbm) présente une aire sous la courbe plus importante que le modèle _rpart_. En effet, l'aire sous la courbe ROC de _gbm_ est de <strong>`r auc(roc.curve.gbm)` </strong>, tandis que celle de _rpart_ est de <strong>`r auc(roc.curve.rpart)`</strong>. Ceci démontre que le modèle _gbm_ est supérieur à _rpart_ dans cette situation. À noter que le temps de calcul de _gbm_ a été beaucoup plus long que _rpart_, ce qui peut être non négligeable, surtout si _rpart_ présente une solution satisfaisante.
+
+```{r courbe}
+df.roc.curve = tibble(x = c(1 - roc.curve.rpart$specificities, 1 - roc.curve.gbm$specificities),
+                    y = c(roc.curve.rpart$sensitivities, roc.curve.gbm$sensitivities),
+                    Model = c(rep("rpart", 7), rep("gbm",1300)))
+ggplot(df.roc.curve,
+      aes(x = x,
+      y = y, group = Model, color = Model)) +
+      geom_line() +
+      geom_point() +
+      geom_abline(slope=1,
+      intercept = 0,
+      linetype='dashed') +
+      coord_fixed(xlim = c(0, 1.13),
+      ylim = c(0, 1.13)) +
+      labs(x='Taux de faux positifs (1 - specificity)',
+      y='Taux de vrais positifs (sensitivity)',
+      title='Figure 3. Comparaison des deux modèle avec la courbe ROC') 
+      # geom_text(aes(label=paste0('(',
+      # round(x, 2),
+      # ',',
+      # round(y, 2),
+      # ')'),
+      # hjust=-0.05,
+      # vjust=1),
+      # size = 2) +
+      # annotate('text',
+      # x=0.5,
+      # y=0.25,
+      # label = paste('AUC =',
+      # round(auc(roc.curve.rpart), 2)),
+      # size = 2)
+
+```  
+
+ 

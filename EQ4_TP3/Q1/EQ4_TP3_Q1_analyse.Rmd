@@ -1,0 +1,197 @@
+---
+title: "EQ4_TP3_Q1_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 4, Travaux pratiques 3, Question 1"
+    toc: true
+date: "28 novembre 2019"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+#will clear all objects includes hidden objects.
+rm(list = ls(all.names = TRUE)) 
+gc()
+
+library(lubridate)
+library(markdown)
+library(rlang)
+library(dplyr)
+library(httr)
+suppressWarnings(library(CVXR, warn.conflicts=FALSE))
+library(lpSolveAPI)
+
+options( scipen = 999 )
+
+
+```
+
+# 1 Programmation mathématique
+
+Cette question consistait à résoudre un problème mathématique afin de maximiser des investissements.
+
+## 1.1 Modélisation
+
+Voici le code permettant de réaliser l'exercice:
+
+```{r modelisation, echo = TRUE, eval = TRUE}
+##### Paramètres ######
+# P1
+pDepenseMois = c(55000, 192500, 0, 110000, 165000)
+# P2
+pRevenuAdditionnel = c(55000, 0, 60000, 0, 0)
+# P3
+pMontantDepart = 550000
+# P4
+pMaxTotalInvestir = 417500
+
+
+# Montant disponible par mois selon les paramètres ci-haut
+montant.disponible.jan   =  pMontantDepart - pDepenseMois[1] + pRevenuAdditionnel[1] - pDepenseMois[2]
+montant.disponible.fev   =  montant.disponible.jan + pRevenuAdditionnel[2]
+montant.disponible.mars  =  montant.disponible.fev - pDepenseMois[3] + pRevenuAdditionnel[3] 
+montant.disponible.avril =  montant.disponible.mars - pDepenseMois[4] + pRevenuAdditionnel[4]
+montant.disponible.mai   =  montant.disponible.avril - pDepenseMois[5] + pRevenuAdditionnel[5] 
+
+# Vecteur des montants disponibles par mois
+vDC <- c(montant.disponible.jan,  montant.disponible.fev,  montant.disponible.mars,
+        montant.disponible.avril,  montant.disponible.mai )
+
+
+# P5
+mTaux <- matrix(data = c(0.025, 0.000, 0.041, 0.000, 0.000, # 1
+                         0.000, 0.060, 0.000, 0.000, 0.000, # 2
+                         0.060, 0.000, 0.000, 0.000, 0.000, # 3
+                         0.000, 0.000, 0.040, 0.000, 0.000, # 4
+                         0.040, 0.000, 0.000, 0.026, 0.000, # 5
+                         0.040, 0.000, 0.000, 0.000, 0.000, # 6
+                         0.000, 0.040, 0.000, 0.000, 0.000, # 7
+                         0.025, 0.000, 0.000, 0.000, 0.000, # 8
+                         0.000, 0.025, 0.000, 0.000, 0.000, # 9
+                         0.000, 0.000, 0.025, 0.000, 0.000, # 10
+                         0.000, 0.000, 0.000, 0.025, 0.000, # 11
+                         0.025, 0.000, 0.025625, 0.000, 0.000, # 12
+                         0.025, 0.000, 0.000, 0.025625, 0.000, # 13
+                         0.000, 0.025, 0.000, 0.025625, 0.000), # 14
+                nrow = 14,
+                ncol = 5,
+                byrow = TRUE)
+
+# Somme des taux par solution (ligne) afin de simplifier le problème
+vTaux <- rowSums(mTaux)
+
+# ===========================
+# Vecteur vDR:
+# Montant disponible pour chacune des solutions d'investissement.
+# En d'autres mots, montant maximum par ligne de la matrice.
+# ===========================
+
+vDR <- c(82500, 82500, 247500, 417500, 82500, 142500, 247500, 357500, 357500, 307500, 115000, 247500, 82500, 82500)
+
+
+# P6
+mBool <- matrix(data = c(1, 1, 1, 1, 1, # 1
+                         0, 1, 1, 1, 1, # 2
+                         1, 1, 1, 1, 0, # 3
+                         0, 0, 1, 1, 1, # 4
+                         1, 1, 1, 1, 1, # 5
+                         1, 1, 1, 0, 0, # 6
+                         0, 1, 1, 1, 0, # 7
+                         1, 1, 0, 0, 0, # 8
+                         0, 1, 1, 0, 0, # 9
+                         0, 0, 1, 1, 0, # 10
+                         0, 0, 0, 1, 1, # 11
+                         1, 1, 1, 1, 0, # 12
+                         1, 1, 0, 1, 1, # 13
+                         0, 1, 1, 1, 1), # 14
+                nrow = 14,
+                ncol = 5,
+                byrow = TRUE)
+
+
+##### Variable ######
+# V1
+vX <- CVXR::Variable(rows = 14, cols = 1)
+
+
+##### Objectif ######
+# O1
+objective <- CVXR::Maximize( t(vX) %*% vTaux ) 
+
+
+##### Contraintes ######
+constraints <- list(
+  # C1
+  sum(mBool[,1]*vX) == vDC[1],
+  sum(mBool[,2]*vX) == vDC[2],
+  sum(mBool[,3]*vX) == vDC[3],
+  sum(mBool[,4]*vX) == vDC[4],
+  sum(mBool[,5]*vX) == vDC[5],
+  # C2
+  sum(vX) == pMaxTotalInvestir,
+  # C3
+  vX <= vDR,
+  # C4
+  vX >= 0
+)
+```
+
+Les variables de décision, vX (V1, placé dans un vecteur), représentent le montant des investissements pour les mois à venir.
+
+Le vecteur de paramètres pDepenseMois (P1) présente les dépenses que l'investisseur devra faire pour les 5 mois (janvier à juin). Le vecteur de paramètres pRevenuAdditionnel (P2) présente les entrées d'argent que l'investisseur recevra pour les 5 mois (janvier à juin). La variable pMontantDepart (P3) représente le montant de départ que l'investisseur possède. La variable pMaxTotalInvestir (P4) présente le montant total disponible pour investir au cours des 5 mois.
+
+La matrice mTaux (P5) présente les différentes solutions d'investissement selon les paramètres d'investissement donnés (2 mois: 2,5%, 3 mois: 4%, 4 mois: 6%). Chaque ligne représente une solution d'investissement pour un seul montant. Toutes les possibilités d'investissement avec les paramètres données sont présentes. À noter que pour des intérêts combinés, ceux-ci sont additionnés au deuxième cycle de placement. Example: 0.025, 0.000, 0.041, 0.000, 0.000, où 0.041 représente le montant investit dans le cycle précédent plus l'intérêt obtenu. À noter que la matrice a été simplifié en vecteur vTaux.<br/>
+La matrice mBool (P6) présente la disponibilité des montants investis pour chacune des solutions d'investissement de mTaux. Si le montant est disponible "0" ou si le montant est investit "1" durant le mois courant.
+
+À noter que vDC et vDR sont des vecteurs qui contiennent les valeurs calculées à partir des paramètres afin que ceux-ci puissent s'appliquer de façon simple comme contrainte.
+
+L'objectif est de maximiser le retour sur les investissements (O1) sous les contraintes C1 à C4. La contrainte C1 borne les montants disponibles pour chacun des 5 mois. La contrainte C2 borne le montant total pouvant être investi. La contrainte C3 borne les montants disponibles pour chacune des solutions d'investissement. La contrainte C4 borne le montant minimum pouvant être investi pour chaque solution d'investissement.
+
+## 1.2 Résolution
+
+
+
+```{r resolution}
+#Objet modèle
+problem <- CVXR::Problem(objective,
+                         constraints)
+
+# Résoudre
+result <- CVXR::psolve(problem,
+                       solver = 'LPSOLVE',
+                       verbose = FALSE)
+
+```
+
+Le status retourné par le solveur: **`r result$status`**
+
+Voici la solution obtenue par le solveur: 
+````{r} 
+#round(result$getValue(vX),2)
+result$getValue(vX)
+
+```
+À noter que la solution est présentée sous forme de notation scientifique. On peut aussi remarquer que le solveur n'arrive pas tout à fait à 0 pour certaine valeur très proche de 0 et ce, même si celui-ci le concidère comme tel.
+
+Voici la valeur du retour sur investissement obtenue par le solveur: **`r result$value`$**
+
+Donc la solution d'investissement est:<br/>
+82 500$ investi en janvier pour 2 mois et en mars (incluant les gains de l'investissement précédent) pour 3 mois<br/>
+165 000$ investi en janvier pour 4 mois<br/>
+60 000$ investi en mars pour 3 mois<br/>
+110 000$ investi en janvier pour 3 mois<br/>
+
+````{r} 
+round(result$getValue(vX),2)
+```
+
+Ceci va permettre à l'investisseur d'avoir un montant total de 224 645$ au 1ier juin.
+
+

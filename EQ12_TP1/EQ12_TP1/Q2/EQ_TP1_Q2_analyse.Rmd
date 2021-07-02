@@ -1,0 +1,162 @@
+---
+title: "EQ12_TP1_Q2_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 12, Travaux pratique 1, Question 2"
+    toc: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+library(lubridate)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(rlang)
+library(dplyr)
+library(httr)
+
+
+
+##==========================================================================================
+##  Function to connect to Google Trend
+##==========================================================================================
+google_trend_API_connection = function(keywords_ , time_period_ , geo_, binary_out_file_)
+{
+   
+   set_config(config(ssl_verifypeer = 0L))
+ 
+   if(!file.exists(binary_out_file_))
+	 {
+	  
+     print ("File google_trends.rds does not exists! - Connecting to the Google Trends API...")
+		
+		 gtrends_res <- gtrends( keyword = keywords_, time = time_period_, geo = geo_)
+		 results_ = gtrends_res$interest_over_time %>%
+		     		                          mutate(hits = as.numeric(ifelse(hits == "<1", 0, hits)))
+		
+		 colnames(results_) <- c("date","hits","geo","time","keyword","gprop","category")
+		 write_rds(results_, binary_out_file_)
+     print ("Google Trends file- saved!")
+    
+	 }else{
+	   
+	    print ("File google_trends.rds exists. Wait...Getting data from file...")
+	    results_ = read_rds(binary_out_file_)
+	 }
+
+	 return (results_)
+}
+
+##==========================================================================================
+##  Function to display a curve to compare the expressions and countries
+##==========================================================================================
+plot_geom_line= function(data_set_, title_, sub_title_, caption_)
+{
+  ggplot(data = data_set_,
+         mapping = aes(x =  (data_set_$date), y = hits)) + 
+         geom_line(size = 0.5) +
+         facet_wrap(keyword ~ geo, scales='free') +
+         ylim(0,100) +
+	       labs(
+	            title = title_,
+	            subtitle = sub_title_,
+		          caption = caption_,
+		          x = 'Date',
+		          y = 'Intérêt relatif'
+     		 ) #+
+	       #theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1),  # rotate x axis text
+         #panel.grid.minor = element_blank())
+}
+
+##==========================================================================================
+##  Function to display bars to compare the expressions and countries
+##==========================================================================================
+plot_geom_bar = function(data_set_, title_, sub_title_, caption_)
+{
+   ggplot(data = data_set_) + 
+         geom_bar(stat="identity", mapping = aes(x =  factor(year), y = hits)) +
+         facet_wrap(geo~keyword) +
+	       labs(
+	            title = title_,
+	            subtitle = sub_title_,
+		          caption = caption_,
+		          x = 'Année',
+		          y = 'Somme des intérêts relatifs'
+     		 ) 
+# 	       theme(axis.text.x = element_text(angle = 90, vjust=.10, hjust = .10 ),  # rotate x axis text
+# 	                  plot.margin = margin(.2,.8,.2,.8, "cm"),
+#          panel.grid.minor = element_blank())
+}
+
+```
+# 2 Google Trends
+
+## 2.1 Expressions à comparer
+Dans cette section, il suffisait d'importer les donner de Google Trends. Nous avons recherché les expressions "Messi" et "Ronaldo" qui sont des jouers professionels de soccer, et ce pour les pays de la Colombie et du Canada.
+
+Voici les 3 premières lignes des résultats :
+```{r comparer}
+
+   keywords_    = c('Messi' , 'Ronaldo')  
+   time_period_ = '2017-01-01 2018-12-31'
+   geo_         = c('CO','CO','CA','CA')
+   binary_out_file_ = "data/google_trends.rds"
+   
+   google_search_result_ = google_trend_API_connection(keywords_, time_period_, geo_, binary_out_file_)
+
+   print ("Google Trends - Results!")
+   print ( head(google_search_result_,5 ))
+
+
+```
+
+## 2.2 Visualisation
+
+La Figure 2 compare les intérêts de recherche pour les mots clés "Ronaldo" et "Messi" pour la Colombie et le Canada. La période couvre 2017 (saison régulière) et 2018 (année de la Coupe du monde). À noter que l'axe des y représente l'intérêt relatif et 100 représente le sommet de popularité selon les paramètres demandés.
+
+```{r visualisation}
+
+  title_ = paste ('Figure 2, Intérêt des recherches pour les mots clés Ronaldo et Messi' )
+  sub_title_ = 'Recherche fait pour la période de janvier 2017 à décembre 2018 en Colombie et au Canada'
+  caption_ = 'Google Trends'
+  google_search_result_$geo <- ifelse( google_search_result_$geo=="CA", "Canada",'Colombie')
+
+  plot_geom_line(google_search_result_, title_ , sub_title_ , caption_)
+
+```  
+
+En analysant la Figure 2, nous pouvons constater que, autant pour Ronaldo que Messi et autant pour le Canada que la Colombie, la popularité de ces mots clés est à son sommet lors de la période de la Coupe du monde en 2018. En effet, le sommet de popularité est pratiquement le double en période de Coupe du monde que durant la saison régulière de 2017. Nous pouvons aussi réaliser que la popularité des mots clés est pratiquement le double en Colombie qu'au Canada. En comparant les deux joueurs, nous pouvons remarquer que Ronaldo est pratiquement deux fois plus populaire que Messi durant la période de la Coupe du monde, mais que les deux joueurs semblent être de popularité équivalente durant la saison régulière de 2017. À noter que les petits sommets de popularité en 2017 en Colombie pour les deux joueurs ne sont pas aux mêmes endroits durant l'année. En effet, pour Messi, nous pouvons voir qu'il y a 3 principaux sommets et pour Ronaldo il y en a qu'un seul, mais plus large. Ceci pourrait être expliqué par des situations médiatiques plus importantes (exemple: nouveau record, scandales, etc).
+
+À noter qu'il aurait été préférable de mettre toutes les courbes sur le même graphique afin d'avoir une meilleure comparaison.
+
+## 2.3 Visualisation au choix
+
+La Figure 3 compare les années 2017 et 2018 sur la somme des intérêts de recherche pour les mots clés "Ronaldo" et "Messi" pour la Colombie et le Canada.
+
+```{r visualisation_choix}
+  
+  data_set_ <- google_search_result_ %>% separate(date, c("year", "month", "day"), sep = "-", convert = TRUE, remove = FALSE)
+  title_ = paste ('Figure 3, Somme des intérêt des recherches pour les mots clés Ronaldo et Messi' )
+  sub_title_ = 'Recherche fait pour les années de 2017 et 2018 en Colombie et au Canada'
+  #data_set_$geo <- ifelse( data_set_$geo=="CA", "Canada",'Colombia')
+
+  plot_geom_bar(data_set_, title_, sub_title_, caption_) 
+ 
+```  
+
+En analysant la Figure 3, nous pouvons constater qu'il y a une augmentation de l'intérêt en 2018 pour Ronaldo. En effet, de façon absolue, il semble avoir le même écart de 2017 à 2018 pour le Canada et la Colombie. Mais, de façon relative, elle semble être plus marquée au Canada. Effectivement, la présence de la Coupe du monde semble avoir créé une augmentation de plus d'un tiers sur la popularité annuelle du joueur. Toutefois, la présence de la Coupe du monde ne semble pas avoir eu le même impact pour Messi. En effet, au Canada, il y a eu très peu d'écart de popularité entre 2017 et 2018. Tandis qu'en Colombie, la popularité a été moindre en 2018. Nous pouvons aussi remarquer que la popularité de Messi en 2017 a été plus grande que celle de Ronaldo et pratiquement équivalente à la popularité de Ronaldo en 2018. Il est possible que Messi ait eu certains événements médiatiques qui ont augmenté sa popularité en 2017. Dans l'ensemble, la popularité au Canada semble plus grande pour Ronaldo, tandis qu'elle semble relativement équivalente pour les deux joueurs en Colombie.
+
+À noter que les équipes des deux joueurs se sont fait éliminer au même niveau en Coupe du Monde.

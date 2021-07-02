@@ -1,0 +1,299 @@
+---
+title: "EQ12_TP1_Q1_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 12, Travaux pratique 1, Question 1"
+    toc: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+library(lubridate)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(rlang)
+library(dplyr)
+library(httr)
+print(getwd())
+
+##========================================================================================
+##                            GLOBAL variables definition
+##========================================================================================
+GLOBAL_ <- env(  	INPUT_DATA_FILE_PATH  =  "data/absence_meteo/envCanYqb_51457_hourly",
+					INPUT_DATA_FILE_TYPE  =  "*.csv",
+					INPUT_EMPLOYEE_FILE_PATH  =  "data/absence_meteo/",
+					COLS = c("Date/Time","Year","Month","Day","Time","Temp (°C)","Weather"),
+					BAD_WEATHER = c("Snow","Rain","Fog","Freezing"),
+					FIRST_ROW = 1,
+					COL_WEATHER_POS = 7)
+   
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import <- function ( file_path_, skip_value_ )
+{
+   	files_names_  = list.files( path = file_path_, 
+	                              recursive = FALSE, 
+				                        pattern = GLOBAL_$INPUT_DATA_FILE_TYPE
+				                      )
+   	
+    full_path_ = file.path ( file_path_ , files_names_ ) 
+	
+   	data_file_ = full_path_	%>%
+                 map(read_csv, skip = skip_value_ )  %>% 
+			           reduce(rbind) 
+   	 
+	
+   	 return ( data_file_ )
+}
+
+
+##==========================================================================================
+##  				Function to read and  clean the employee data file
+##==========================================================================================
+employee_data_cleaning <- function(employee_data_)
+{
+    ## Move log_emp1 , log_emp2 , log_emp3 from the Variable (columns) to Observations(Rows)
+    tmp <- employee_data_ %>% gather('log_emp1','log_emp2','log_emp3', 
+                            key = 'employee_desc', 
+                            value="is_employee_logged")
+  
+    ## Convert  log_emp1 , log_emp2 , log_emp3 to employe_no
+    tmp <- tmp %>% separate(employee_desc, into = c("employee_des","employe_no"),
+                          sep = "log_emp", convert = TRUE)
+  
+    ## Remove a temporal column used to create the employe_no
+    tmp <- tmp %>% select(-employee_des)
+  
+    ## Remove noise from the tibble
+    tmp  <- filter( tmp, tmp$is_employee_logged %in% TRUE )
+    tmp <- tmp %>% select( -is_employee_logged )
+ 
+    ## Add new columns to the tibble : Year Month Day Hour
+    tmp <- tmp %>% mutate(tempDateTime =`Date/Time`)
+    tmp <- tmp %>% separate(tempDateTime, into =c('Year','Month','Day'), sep = '-')
+    tmp <- tmp %>% separate(Day, into=c('Day','Time'),sep=" ")
+    tmp <- tmp %>% separate(Time, into=c('Hour','tmpTime'),sep=":00:00", convert = TRUE)
+    tmp <- tmp %>% select(-tmpTime)
+  
+    cleaned_employee_data_ = tmp %>% select("employe_no","Date/Time", "Year","Month","Day","Hour","weekend")
+  
+    return (cleaned_employee_data_)
+} 
+
+```
+
+
+
+# 1 Météorologie et absences virtuelles
+
+## 1.1 Charger les données Environnement Canada
+
+Voici les 3 premières lignes des données d'environnement Canada (sans préparation):
+
+Note: Erreur(warnings) pendant l'importation du fichier csv
+      See spec(...) for full column specifications. Warning: 1 parsing failure.
+Raison: les erreurs ou warning sont dûes aux colonnes manquantes. Exemples:
+        "2014-12-20 12:00","2014","12","20","12:00"
+        
+```{r charger1}
+
+    data_file_imported_ = import (GLOBAL_$INPUT_DATA_FILE_PATH,15)
+
+    ##Change the column Year from INT to CHAR to be consistent with the employee data
+    data_file_imported_$Year<- data_file_imported_$Year %>%  as.character
+  
+    ## Select only the required columns
+    data_file_ = data_file_imported_  %>% select(GLOBAL_$COLS)
+
+
+    ## Display the first three (3) rows (without any operation)
+    value_3_rows = head(data_file_,3)
+
+    print ( value_3_rows )
+```
+
+
+## 1.2 Nettoyer les données d’Environnement Canada
+
+```{r Nettoyer1, echo=FALSE}
+
+    ## 1.2 Sort of the data structure by date/time column
+    data_file_ = data_file_[order(data_file_$`Date/Time`),]
+
+    ## Display the number of observations en utilisant summarize
+    nbr_of_observation = data_file_ %>% summarize ( count = n() ) 
+    
+    ## Display the number of observations en utilisant nrow
+    nrows_ = nrow(data_file_ )
+    
+    
+    ## Display the number of missing values
+    nbr_of_missing_values_1 = data_file_ %>% filter(is.na(Weather)) %>% summarize (count = n())
+
+    ## Display the first three (3) missing rows
+    missing_value_3_rows = head(filter(data_file_, is.na(data_file_$Weather)),3)
+
+    ## Replace the first row having NA value by the first !NA occurence
+    weather_col = GLOBAL_$COLS[GLOBAL_$COL_WEATHER_POS]
+    first_row  = GLOBAL_$FIRST_ROW
+    
+    if ( is.na(data_file_[first_row,weather_col]) ) 
+    {
+       first_non_NA_occurence = filter(data_file_, !is.na(data_file_$Weather))[first_row,weather_col]
+       data_file_[first_row,weather_col] = first_non_NA_occurence
+    }
+
+    ## Replace the NA's values in the tibble by the previous !NA value
+    data_file_  = fill(data_file_,weather_col)  
+
+    ## Display the number of missing values after filtrage
+    nbr_of_missing_values_2 = data_file_ %>% filter(is.na(Weather)) %>% summarize (count = n()) 
+
+    ## Add a new column named Hour from data_file_
+    data_file_filtred_by_hour_ = mutate(data_file_, Hour = hour(data_file_$Time))
+
+								 
+    ## Filter by the time-on-server spent the employees 
+    data_file_filtred_by_hour_ = filter( data_file_filtred_by_hour_,
+		                    	       data_file_filtred_by_hour_$Hour %in% (8:19))
+
+    ## Display the number of observations being filtered by hour
+    nbr_of_observation_h = data_file_filtred_by_hour_ %>% summarize ( count = n() ) 
+```
+Nombre d'observations dans les données d'Environnement Canada (avec summary) : `r nbr_of_observation`
+
+Nombre d'observations dans les données d'Environnement Canada (avec nrow) : `r nrows_`
+
+Nombre d'observations qui quontiennent des valeurs manquantes avant le traitement : `r nbr_of_missing_values_1`
+
+Les trois permières lignes contenant des valeurs manquantes :
+```{r echo = FALSE}
+missing_value_3_rows
+```
+Nombre d'observations qui quontiennent des valeurs manquantes après le traitement : `r nbr_of_missing_values_2`
+
+Les trois premières lignes après le traitement des valeurs manquantes :
+```{r echo = FALSE}
+head(data_file_,3)
+```
+
+Nombre de lignes restantes après le filtrage en fonction de l'heure (entre 8h et 19h) : `r nbr_of_observation_h`
+
+Voici le code R qui permet de faire le traitement des données manquantes :
+```{r echo = TRUE, eval = FALSE}
+
+   ## Replace the first row having NA value by the first !NA occurence
+   weather_col = GLOBAL_$COLS[GLOBAL_$COL_WEATHER_POS]
+   first_row  = GLOBAL_$FIRST_ROW
+
+   if ( is.na(data_file_[first_row,weather_col]) ) 
+   {
+       first_non_NA_occurence = filter(data_file_, !is.na(data_file_$Weather))[first_row,weather_col]
+       data_file_[first_row,weather_col] = first_non_NA_occurence
+   }
+
+   ## Replace the NA's values in the tibble by the previous !NA value
+   data_file_  = fill(data_file_,weather_col)  
+```
+## 1.3 Charger les données de connexion des employés au serveur
+
+Voici les 3 premières lignes des données du fichier de connexion des employés au serveur :
+```{r charger2}
+
+   ## 1.3 Load employees data file
+   employees_file_imported_ = import (GLOBAL_$INPUT_EMPLOYEE_FILE_PATH,0)
+   value_3_rows = head(employees_file_imported_,3)
+   print ( value_3_rows )
+```
+## 1.4 Nettoyer les données horaire des employés
+
+Voici les 3 premières lignes des données du fichier de connexion des employés au serveur suite à la transformation :
+```{r nettoyer2}
+
+   ## 1.4 Load employees data file - cleaning
+   cleaned_employee_data_ = employee_data_cleaning(employees_file_imported_)
+   value_3_rows = head(cleaned_employee_data_,3)
+   print ( value_3_rows )
+```
+
+## 1.5 Identifier les “belles” heures, combiner la météo et les connexions
+
+```{r weather}
+   
+   ## 1.5 Add a boolean column to know if the weather is good 
+   data_file_filtred_by_hour_ = data_file_filtred_by_hour_ %>% 
+                                      mutate(is_bad_weather=str_detect(data_file_filtred_by_hour_$Weather,GLOBAL_$BAD_WEATHER) |
+                                             data_file_filtred_by_hour_$`Temp (°C)` <= 20 )
+
+
+   data_file_filtred_by_hour_ = filter( data_file_filtred_by_hour_)
+
+   employee_weather = cleaned_employee_data_ %>% left_join (data_file_filtred_by_hour_, by = c("Year","Month","Day","Hour"))
+   
+   #compare by date/time to see the differences??? to do
+   nbr_employee_weather = employee_weather %>% summarize (count = n())
+
+   nbr_cleaned_employee_data = cleaned_employee_data_ %>% summarize (count = n())
+
+   nbr_weather = data_file_filtred_by_hour_ %>% summarize (count = n())
+
+   employee_weather_missing_values = employee_weather %>% filter(is.na(Weather)) %>% summarize (count = n())
+
+
+```
+
+Nombre d'observation dans les tables avant la jointure: employés `r nbr_cleaned_employee_data` et météo `r nbr_weather`
+
+Nombre d'observation de la table jointe des employés et de la météo: `r nbr_employee_weather`
+
+Nombre d'observations qui quontiennent des valeurs manquantes après la jointure : `r employee_weather_missing_values`
+
+Voici les 5 premières lignes de la table des données de météo après transformation :
+```{r echo = FALSE}
+print(head(data_file_filtred_by_hour_,5))
+```
+Voici les 5 premières lignes de la table jointe des données de météo et des données de connexions des employés :
+```{r echo = FALSE}
+print(head(employee_weather,5))
+```
+## 1.6 Est-ce que la température a un impact?
+
+La figure 1 présente le nombre de connexions au serveur de chacun des trois employés pour la période de mai à septembre. Cette période a été évaluée comme étant « estival » où la température est plus clémente. Ce graphique nous permet d’analyser si certains employés sont plus susceptibles de ne pas travailler en présence d’une belle température (température de plus de 20 degrés, non pluvieuse et non brumeuse). À noter que les zones plus pâles (transparence) des couleurs indiquent que l’employé s’est connecté le weekend. 
+
+```{r echo = FALSE}
+  
+   employee_weather$Month<- employee_weather$Month %>%  as.integer()
+
+   employee_weather <- filter( employee_weather, !is.na(employee_weather$is_bad_weather) )
+
+   ggplot(data = filter( employee_weather, 
+			                  employee_weather$Month %in% (5:9))) +
+                 geom_bar(mapping = aes(x = employe_no, fill =  is_bad_weather,alpha = weekend)) +
+                          scale_alpha_manual(values=c(1, 0.5)) +
+                 labs(title = "Figure 1. Nombre de connexion sur le serveur par employé",
+                      subtitle = "Pour la période de mai à septembre de 2014 à 2018",
+                      x = "Numéro de l'employé",
+                      y = "Nombre de connexions", 
+                      fill = "Connexion par mauvais temps",
+                      alpha = "Connexion le Weekend"
+                 )
+
+```
+
+En analysant le premier employé, nous pouvons constater que celui-ci travaille légèrement plus par mauvais temps que par beau temps. En effet, cet employé se connecte 60% du temps lorsque la température est moins clémente. De plus, il se connecte aussi le weekend principalement lorsque la température n’est pas au rendez-vous. Toutefois, pour cette période, cet employé semble avoir un nombre de connexions inférieur aux autres.
+
+En ce qui concerne le deuxième employé, nous pouvons réaliser que celui-ci semble plus profiter du beau temps. En effet, celui-ci se connecte 93% du temps en période de mauvais temps. Toutefois, cet employé semble se reprendre les weekends. Parmi les 3 employés, il est celui qui se connecte le plus souvent le weekend par mauvais temps. Au total des connexions pour cette période, il s’est connecté davantage que le premier, mais moins que le troisième.
+
+En analysant le troisième employé, nous pouvons constater que celui-ci travaille pratiquement à proportion égale beau temps et mauvais temps. Toutefois, il semble avoir pris une routine de travailler que la semaine et non les weekends. Il est à noter qu’il est l’employé qui s’est connecté le plus durant cette période.
+
+En somme, le premier employé et principalement le deuxième employé semblent en effet se connecter au serveur selon la température extérieure. Toutefois, ces derniers semblent se rattraper les weekends. De plus, il est à noter que dans l’ensemble des années, le deuxième employé est celui qui s’est connecté le plus (8063 connexions, contre 5242 pour le premier et 6219 pour le troisième. Donc, malgré le nombre de connexions moindre durant l’été pour le deuxième employé, il se connecte davantage le reste de l’année. Ainsi, la température semble avoir un impact sur la présence au travail de deux des employés durant l’été, mais cet impact ne se reflète pas sur l’ensemble du travail annuel de ces employés. 

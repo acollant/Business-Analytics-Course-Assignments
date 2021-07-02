@@ -1,0 +1,467 @@
+---
+title: "EQ6_TP2_Q1_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 6, Travaux pratiques 2, Question 1"
+    toc: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+#will clear all objects includes hidden objects.
+rm(list = ls(all.names = TRUE)) 
+gc()
+
+library(lubridate)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(caret)
+library(rlang)
+library(dplyr)
+library(httr)
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import_single_cvs <- function ( file_path_, file_name_  ){
+  
+  full_path_ <- file.path ( file_path_ , file_name_ ) 
+  
+    file_ = read.csv(full_path_)
+    print(full_path_)
+    return( file_ )
+}
+##=========================================================================================
+
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import.multiple.cvs <- function ( file_path_, pattern_ , skip_value_ )
+{
+     
+    files_names_  = list.files( path = file_path_, 
+                                recursive = FALSE, 
+                                pattern = pattern_
+                              )
+  
+    full_path_ = file.path ( file_path_ , files_names_ ) 
+    
+   
+   
+    file_ = full_path_	%>%
+                 map(read_csv, skip = skip_value_ )  %>% 
+                 reduce(rbind) 
+  
+    return ( file_ )
+}
+##=========================================================================================
+
+
+
+##=========================================================================================
+##  Function to normalize the columns
+##=========================================================================================
+normalize <- function(x){
+  return ( (x - min(x) ) / ( max(x) - min(x) ))
+}
+##=========================================================================================
+
+
+
+##=========================================================================================
+##  Function to run and/or save the model
+##=========================================================================================
+run_best_model <- function(file_ ){
+ 
+  if(!file.exists(file_)) return (NULL)
+    
+  return ( readRDS(file_) )
+  
+}
+
+
+##=========================================================================================
+##  Function to run and/or save the model
+##=========================================================================================
+run_model <- function(file_path_="data", model_method_name_, data.training_,  train_control_pbject_ ){
+  
+  file_name_ = (paste(model_method_name_,'rds',sep ='.'))
+  file_ <- file.path ( file_path_ , file_name_ )
+  
+  print(model_method_name_)
+  
+  if(!file.exists(file_))
+  {
+    #Run Model for first time
+    set.seed(278523)
+    if ("knn" %in% model_method_name_ ) {
+        model_  = train( outcome ~ .,
+                       data = data.training,
+                       method = "knn",
+                       trControl = trainControl_,
+                       tuneLength = 20,
+                       tuneGrid = expand.grid(k= seq(1,100,by = 2)),
+                       type = "regression"  )
+    }
+    
+    if ("gbm" %in% model_method_name_ ) {
+      grid_ <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                              n.trees = (1:30)*50, 
+                              shrinkage = 0.1,
+                              n.minobsinnode = 20
+                              )
+      
+        model_  = train(outcome ~ . , 
+                     data = data.training,
+                     method = 'gbm',
+                     verbose = FALSE,
+                     trControl = trainControl_,
+                     preProc = c("center","scale"),
+                     tuneLength = 10,
+                     tuneGrid = grid_)
+    }
+                    
+    if ( "nnet" %in% model_method_name_  ) {
+        grid_ <- expand.grid(decay = c(0.01, 0.5, 0.1), size = c(1:10))
+        print("grid")
+        print(grid_)
+        model_ = train(outcome ~ .,
+                     data = data.training,
+                     method = "nnet",
+                     trControl = trainControl_,
+                     preProc = c("center","scale"),
+                     tuneGrid = grid_,
+                     trace = F,
+                     linout = 1)
+    }
+    
+    
+    if ("svmLinear" %in% model_method_name_ ) {
+      model_ = train(outcome ~ .,
+                     data = data.training,
+                     method = "svmLinear",
+                     trControl = trainControl_,
+                     preProc = c("center","scale"),
+                     tuneLength = 10
+                     )
+    }
+    
+    
+    # Save model
+    print ("Saving model")
+    print(file_)
+    saveRDS(model_, file_)
+    print (paste(file_,"- saved!"))
+    
+  }else{
+    print("Load model from file")
+    model_ = readRDS(file_)
+  }
+  
+  return (model_)
+}
+
+```
+# 1 Estimation de l’efficacité d’une opération de recherche en mer
+
+Comme mentionné dans l'énoncé, nous devons jouer le rôle d'analyste pour un groupe
+responsable de recherche et sauvetage maritime.
+
+## 1.1 Préparer les données
+
+Dans cette section, nous devions faire un prétraitement avant d'appeler la fonction `train`.
+
+```{r preparer}
+
+    # Load the data
+    INPUT_DATA_FILE_PATH  =  "data"
+    INPUT_DATA_FILE_TYPE  =  "*.txt"
+    INPUT_FILE_csv_       = "Q1_data.txt"
+    
+    
+    #data.input = import.multiple.cvs (INPUT_DATA_FILE_PATH, INPUT_DATA_FILE_TYPE, 0) # load multiple cvs files
+    data.input = import_single_cvs(INPUT_DATA_FILE_PATH,INPUT_FILE_csv_)             # load a single cvs file
+    
+    # Inspect the data
+    data.input.head = head(data.input, 10)                             # Display the first 10 rows of input set 
+    
+    count.is.na_ = data.input %>% summarize(na_count = sum(is.na(.)))  # Check out for missing explicit values
+    
+    data.input = drop_na (data.input)  # If a new data file is used having na elements
+    
+    count.is.na_ = data.input %>% summarize(na_count = sum(is.na(.)))  # Check out for missing explicit values
+    
+```
+
+Après la préparation, les données montraient `r count.is.na_` donnée manquante.
+
+Voici quelques lignes:
+```{r echo = FALSE}
+data.input.head
+```
+
+Les types de colonnes sont corrects, certains sont des entiers et d'autres des nombres naturels, tel qu'illustrer ci contre:
+```{r echo = FALSE}
+str(data.input) 
+```
+
+
+## 1.2 Entraînement
+
+Nous avons choisi modèles pour la prédiction de la probabilité de succès d'une recherche. Ces deux modèles sont _k-nearest neighbors_ et _neural network_. À noter qu'afin d'améliorer les résultats de notre entrainement, nous avons normalisé nos données (méthode de normalisation MIN-MAX).
+
+Pour nos grids, nous avons utilisé ces paramètres:
+
+knn: `expand.grid(k= seq(1,100,by = 2))`
+
+nnet: `expand.grid(decay = c(0.01, 0.5, 0.1), size = c(1:10))`
+
+Ces paramètres du grid nous ont permis de trouver les bons paramètres pour l'entrainement, ceci sera expliqué dans le prochain point.
+
+De plus, nous avons retiré certaines colonnes qui représentaient une trop grande corrélation entre elles, le cutoff a été établi à .75. Nous avons créé aussi les partitions selon la règle 80:20. Et, nous avons établi le nombre de validations croisées à 10 pour knn et à 22 pour nnet.
+
+```{r entrainement}
+
+    # From above summary statistics, it shows us that all the attributes have a different range. 
+    # So, we need to standardize our data. We can standardize data using caret's preProcess() method.
+    # data.input.norm = data.input  #<- as.data.frame(lapply (input.data,normalize))
+    
+    data.input =  as.data.frame(lapply ( data.input,normalize)) # not sure if I have to normalize the data before
+    too_high   =  findCorrelation(cor(data.input[-23]),cutoff = .75)
+    data.input =  select(data.input,-too_high)
+
+    # Randomly  split data into training and test set
+    set.seed(278523)
+    samples_      = data.input$outcome %>% createDataPartition(p = 0.8, list = FALSE ) # Apply 80:20 rule
+    data.training = data.input[ samples_ ,]
+    data.test     = data.input[-samples_ ,]
+
+    #=========================================================================================
+    #                   Compute the KNN model
+    #=========================================================================================
+
+    # Set the trainControl object
+    trainControl_ = trainControl(method = "repeatedcv",number =  10, repeats = 10    )
+
+    # Execute/Get the training model
+    model.knn =  run_model(INPUT_DATA_FILE_PATH, 'knn',data.training, trainControl_)
+    
+    # #
+    # 
+    # # 
+    # # Compute the residuals
+    # data.residual.knn = data.predict.knn - data.test$outcome
+    # # 
+    # # Compute the prediction error RMSE
+    # rmse.knn = RMSE(data.predict.knn, data.test$outcome)
+    # 
+    # #  #postResample()
+    
+    # 
+    # Make predictions on the test data
+    data.predict.knn.train = predict(model.knn , newdata = data.training,  type = "prob")
+    
+    #
+    # Make predictions on the test data
+    data.predict.knn.test = predict(model.knn , newdata = data.test)
+    
+    # 
+    # Compute the residuals
+    data.residual.knn = data.training$outcome - data.predict.knn.train
+    # 
+    # Compute the prediction error RMSE
+    rmse.knn = RMSE(data.predict.knn.test, data.test$outcome)
+    
+    #  #postResample()
+    
+    
+    
+    
+    #=========================================================================================
+    # Compute the Neural Network model
+    #=========================================================================================
+
+
+    trainControl_ = trainControl(method = "cv",number = 22)
+    model.nnet =  run_model(INPUT_DATA_FILE_PATH, "nnet", data.training, trainControl_)
+
+    # print("# Training model best tune")
+    # print(model.nnet$bestTune)
+    # 
+
+    # Make predictions on the test data
+    data.predict.nnet = predict(model.nnet , newdata = data.test)
+
+    # Compute the prediction error RMSE
+    rmse.nnet = RMSE(data.predict.nnet, data.test$outcome)
+
+    
+    
+    
+```
+
+## 1.3 Évaluation de l’entraînement pour chaque modèle individuel
+
+### 1.3.1 Méthode des k plus proches voisins (knn)
+
+La Figure 1 montre la valeur de RMSE selon la valeur du nombre de plus proche voisin choisi (k). Nous pouvons constater que le modèle devient rapidement surentrainé. En effet, `r model.knn$bestTune` est la meilleure valeur pour le paramètre k (nombre de voisins) ici. On peut constater qu'à partir de la valeur 7, le RMSE augmente. Nous obtenons un RMSE de `r rmse.knn` pour ce modèle.
+
+```{r analyse1.1}
+    ggplot(data = tibble(k = model.knn$results$k, RMSE = model.knn$results$RMSE),
+           aes(x = k, y = RMSE)) +
+          geom_line() + geom_point() +
+          labs(title = "Figure 1. Valeur du RMSE selon la valeur de K dans notre knn")
+```
+
+La Figure 2 présente l'histogramme de la distribution des résidus des données d'entrainement. Nous pouvons constater que l'ensemble des valeurs tournent autour de 0. Toutefois, nous pouvons réaliser que le modèle a tendance à davantage sous-évalué que de sur évalué. En effet, nous pouvons trouver des valeurs allant jusqu'à -0,2 pour la sous-évaluation, comparativement à 0,1 pour la sur évaluation.
+
+```{r analyse1.2}
+ data.graph <- tibble(fitted = data.predict.knn.train  ,
+               resid = data.residual.knn   )
+ggplot(data = tibble(resid = data.residual.knn),
+      aes(x = resid)) +
+      geom_histogram() +
+        labs(title = "Figure 2. Histogramme de la distribution des résidus pour le modèle KNN")
+```
+
+La Figure 3 présente la distribution dans l'espace des résidus des données d'entrainement. Nous pouvons constater que le nuage de point est relativement diffu autour de 0. En effet, pour les valeurs de x<~65, les points semblent assez dispersés entre -0,1 et 0,1. De plus, il y a certains points sous la valeur de -0,1. Toutefois, pour les valeurs de x>~65, les points se rapprochent davantage de 0.
+
+```{r analyse1.3}
+ggplot(data = data.graph,
+       aes(x = fitted,
+      y = resid)) +
+      geom_point() +
+      labs(title = "Figure 3. Affichage par point des résidus pour le modèle KNN")
+
+
+```
+
+### 1.3.2 Méthode des réseaux de neurones (nnet)
+
+La figure 4 montre la valeur de RMSE selon la veleur du nombre d'unités cachées (size) pour chacun des poids des _decay_. Nous pouvons constater qu'avec un _decay_ de `r model.nnet$bestTune$decay`, les RMSE sont plus bas. De plus, le RMSE semble se stabiliser à partir du pramètre _size_ égal à 6, mais la valeur de _size_ qui présente le meilleur RMSE est `r model.nnet$bestTune$size`. Ainsi, nos meilleures valeurs de paramètre sont size=`r model.nnet$bestTune$size` et decay=`r model.nnet$bestTune$decay`. Ceci nous amène à une valeur de RMSE de `r rmse.nnet`.
+
+```{r analyse2.1}
+ggplot(data = tibble(decay = as.character(model.nnet$results$decay), RMSE = model.nnet$results$RMSE, 
+                     size = model.nnet$results$size),
+       aes(x = size, y = RMSE, group = decay, color = decay)) +
+      geom_line() + geom_point() +
+      labs(title = "Figure 4. Valeur du RMSE selon la valeur de size dans notre nnet")
+```
+
+La Figure 5 présente l'histogramme de la distribution des résidus des données d'entrainement. Nous pouvons constater que l'ensemble des valeurs tournent autour de 0. Toutefois, nous pouvons réaliser que le modèle a tendance à davantage sous évalué que de sur évalué. En effet, nous pouvons trouver des valeurs allant sous -0,2 pour la sous-évaluation, comparativement à 0,05 pour la sur évaluation.
+
+```{r residuel1}
+nnet.train.resid = data.training$outcome - model.nnet$finalModel$fitted.values
+ggplot(data = tibble(resid = nnet.train.resid),
+aes(x = resid)) +
+geom_histogram() +
+        labs(title = "Figure 5. Histogramme de la distribution des résidus pour le modèle nnet")
+```
+
+La Figure 6 présente la distribution dans l'espace des résidus des données d'entrainement. Nous pouvons constater que le nuage de points est légèrement diffu, mais relativement près de 0. En effet, il n'y a pas beaucoup de résidus sous les -0,05 et aucun au-dessus de 0,05. Toutefois, il y a deux résidus qui se trouvent sous les -0,2.
+
+```{r residuel2}
+nnet.train.fitted.resid <- tibble(fitted = model.nnet$finalModel$fitted.values,
+resid = model.nnet$finalModel$residuals)
+ggplot(data = nnet.train.fitted.resid,
+       aes(x = fitted,
+      y = resid)) +
+      geom_point() +
+      labs(title = "Figure 6. Affichage par point des résidus pour le modèle nnet")
+```
+
+## 1.4 Comparaison des deux modèles
+Les Figures 7 et 8 comparent les valeurs prédites (en bleu) et les valeurs réelles (en noir) sur les données tests. Nous pouvons constater une démarcation bien visible entre le modèle nnet et knn. En effet, dans le modèle nnet, les valeurs réelles sont davantage plus près et plus compactent des valeurs prédites que dans le modèle knn.
+
+De plus, les résultats après le recalcule les modèles montrent que <strong>le modèle nnet est plus performant</strong> que le modèle knn en comparant les valeurs de RMSE  de <strong>`r rmse.nnet` et `r rmse.knn` </strong> respectivement. Il est à mentionner que les valeurs de _Rsquared_ sont près de 1 pour les deux modèles, mais davantage pour le modèle nnet.
+
+Calcule de la performance de knn
+```{r performance_KNN}
+ postResample(pred=data.predict.knn.test,obs=data.test$outcome)
+ 
+knn.train.fitted.real <- tibble(real_y = data.test$outcome,
+pred_y = data.predict.knn.test)
+ggplot(data = knn.train.fitted.real,
+       aes(x = real_y,
+    y = pred_y)) +
+    geom_point() +
+    geom_point(aes(x = real_y,
+    y = real_y),
+    color = 'blue',
+    shape=15) +
+    coord_fixed() +
+      labs(title = "Figure 7. Compraison entre les valeurs prédites et réelles pour knn")
+
+``` 
+
+Calcule de la performance de nnet
+```{r performance_NNet}
+postResample(pred=data.predict.nnet,obs=data.test$outcome)
+
+nnet.train.fitted.real <- tibble(real_y = data.test$outcome,
+pred_y = data.predict.nnet)
+ggplot(data = nnet.train.fitted.real,
+       aes(x = real_y,
+    y = pred_y)) +
+    geom_point() +
+    geom_point(aes(x = real_y,
+    y = real_y),
+    color = 'blue',
+    shape=15) +
+    coord_fixed() +
+      labs(title = "Figure 8. Compraison entre les valeurs prédites et réelles pour nnet")
+``` 
+
+
+## 1.5 Compétition.. en production (bonus)
+
+Suite aux calculs de la performance pour les modèles nnet et knn, nous avons conclu que nnet est le meilleur modèle. Nom du ficher qui contient le meilleur modèle: <strong>Q1_challenger_T6_nnet.rds</strong>
+
+```{r challenge}
+
+    #=========================================================================================
+    # Compute the Best Model - challenge
+    #=========================================================================================
+    
+    
+    # Display the best model
+    best_model_file_name = ("Q1_challenger_T6_nnet.rds")
+    print(best_model_file_name)
+    
+    file_ <- file.path ( INPUT_DATA_FILE_PATH , best_model_file_name )
+    
+    # Execute the best model - challenge 
+    model.best =  run_best_model(file_)
+    if (!is.null(model.best)) {
+      
+      print("# Training model best tune")
+      print(model.best$bestTune)
+      
+      print("Train Model Perfomance")
+      print(model.best)
+      
+      # Make predictions on the test data
+      data.predict.best = predict(model.best , newdata = data.test)
+      
+      # Compute the prediction error RMSE
+      print("# RMSE")
+      print(RMSE(data.predict.best, data.test$outcome))
+      
+      print("postResample: ")
+      print(postResample(pred=data.predict.nnet,obs=data.test$outcome))
+      
+    }else {
+      print ("There is not a best model generated!")
+    }
+```     

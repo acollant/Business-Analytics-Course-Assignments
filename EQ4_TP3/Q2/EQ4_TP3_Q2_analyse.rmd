@@ -1,0 +1,540 @@
+---
+title: "EQ4_TP3_Q2_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 4, Travaux pratiques 3, Question 2"
+    toc: true
+date: "28 nombre 2019"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+#will clear all objects includes hidden objects.
+rm(list = ls(all.names = TRUE)) 
+gc()
+
+library(lubridate)
+library(tictoc)
+library(tidyverse)
+library(gtrendsR)
+library(markdown)
+library(ggplot2)
+library(rlang)
+library(dplyr)
+library(httr)
+
+##=========================================================================================
+##  Function to read all the rds files and load the content into a tibble data structure
+##=========================================================================================
+import_single_rds <- function ( file_path_, file_name_  ){
+  
+    full_path_ <- file.path ( file_path_ , file_name_ ) 
+  
+    file_ = readRDS(file = full_path_)
+    return( file_ )
+}
+
+
+```
+
+# 2 Optimisation combinatoire
+
+
+## 2.1 Modélisation: Programme en nombres entiers avec CVXR
+
+Cette sous section consiste à construire la fonction model_coverage_dom_set, la voici:
+
+```{r preparer, echo = TRUE, eval = TRUE}
+
+model_coverage_dom_set <- function(adjacency_matrix) {
+  ##### Paramètres ######
+  # P1
+  mInter <- adjacency_matrix
+  # P2
+  MaxBoite <- 1
+  # P3
+  MinBoite <- 0
+  
+  ##### Variable ######
+  # V1
+  vX <- CVXR::Int(rows = 1, col = ncol(adjacency_matrix))
+  
+  ##### Objectif ######
+  # O1
+  objective <- CVXR::Minimize(sum(vX))
+  
+  ##### Contraintes ######
+  constraints <- list(
+    # C1
+    vX >= MinBoite,
+    # C2
+    vX <= MaxBoite,
+    # C3
+    vX %*% mInter >= 1 # Chaque intersection doit être visible par au moins une boîte. 
+  )
+
+  problem <- CVXR::Problem(objective, constraints)
+
+  result <- list(variables = vX,
+        problem = problem)
+
+}  
+
+# Load the data
+INPUT_DATA_FILE_PATH  =  "data"
+INPUT_FILE_RDS_       = "Q2_tiny_interproblem_adjacency_matrix.rds"
+
+matrice <- import_single_rds(INPUT_DATA_FILE_PATH,INPUT_FILE_RDS_)             # load a single rds file
+
+my_problem <- model_coverage_dom_set(adjacency_matrix = matrice)
+
+```
+
+Les variables de décision, vX (V1, placé dans un vecteur), représentent les intersections où seront placées les boîtes noires.
+
+Le vecteur de paramètres mInter (P1) présente l'ensemble les combinaisons des intersections qui peuvent être vu par des boîtes noires, les relations sont présentées sous forme de valeurs binaires.
+
+L'objectif est de minimiser le nombre de boîtes noires (O1) sous les contraintes C1 à C3. La contrainte C1 et C2 borne les valeurs des variables par la valeur du maximum et du minimum de boîtes par intersection, soit 0 et 1. La contrainte C3 borne le nombre minimum de vu que doit avoir une intersection par une ou des boîtes noires (chaque inersection doit être vu par au moins une boîte noire).
+
+## 2.2 Résoudre le programme
+
+Cette sous section consiste à résolver le programme mathématique. Voici les réponses:
+
+```{r resoudre}
+
+result <- CVXR::psolve(my_problem$problem,
+                   solver = 'LPSOLVE',
+                   verbose = FALSE)
+
+cat('Status retourné par le solveur:',
+    result$status,
+    '\n\n')
+
+cat('Solution retourné par le solveur:',
+    result$getValue(my_problem$variables),
+    '\n')
+
+
+
+```
+
+La solution est en effet optimal, selon la solution proposée par le solveur, nous avons une boîte noire aux insections 2 et 3, ce qui est une solution optimale. On ne peut pas avoir moins de 2 boîtes noires ici et les deux boîtes noires voient toutes les intersections. Autre solution possible aurait été 2 et 5.
+
+## 2.3 Modélisation générale à l’aide de fonctions et de variables globales
+
+Cette sous section consiste définir les fonctions globales, voici le code:
+
+```{r modelisation, echo = TRUE, eval = TRUE}
+
+INPUT_DATA_FILE_PATH  =  "data"
+INPUT_FILE_RDS_       = "Q2_tiny_interproblem_adjacency_matrix.rds"
+
+matrice <- import_single_rds(INPUT_DATA_FILE_PATH,INPUT_FILE_RDS_) 
+
+# P1
+mInter <- matrice
+# P2
+MaxBoite <- 1
+# P3
+MinBoite <- 0
+
+val_obj <- function(x){
+  # objetif: minimiser sum(x)
+  sum(x)
+}
+
+is_sol_feasible <- function(x) {
+  
+  is_feasible = TRUE
+  vX <- x %*% mInter
+  
+  for( i in 1:length(x) ){
+    
+    # C1 et C2
+    if(x[i] < MinBoite || x[i] > MaxBoite){
+      is_feasible = FALSE
+      break
+    }
+    
+    # C3
+    else if(vX[i] < 1){
+      is_feasible = FALSE
+      break
+    }
+  }
+  
+  is_feasible
+}
+
+is_sol_x_better_than_y <- function(x,y) {
+  sol_x_better = FALSE
+  if (!is_sol_feasible(x)){
+  sol_x_better = FALSE
+  } else if (!is_sol_feasible(y)){
+  sol_x_better = TRUE
+  } else if (val_obj(x) < val_obj(y)) {
+  sol_x_better = TRUE
+  }
+  sol_x_better
+}
+
+# solution à tester
+x <- c(0, 0, 1, 1, 0, 0)
+y <- c(0, 0, 1, 1, 0, 1)
+z <- c(1, 1, 1, 1, 1, 1)
+
+##### test #####
+current_sol = x
+
+if(is_sol_x_better_than_y(y, current_sol)){
+  current_sol = y
+}
+
+if(is_sol_x_better_than_y(z, current_sol)){
+  current_sol = z
+}
+
+cat('La meilleure des 3 solutions est:',
+    current_sol,
+    '\n')
+```
+
+## 2.4 Deux algorithmes de recherche aléatoire
+
+Cette sous section consiste élaborer deux algorithmes de recherche aléatoire. Voici la solution pour 1000 itérations pour le fichier Q2_large_interproblem_adjacency_matrix.rds
+
+```{r aleatoire}
+
+# #######################
+# Ici, je n'obtient pas d'autres solutions que d'avoir uniquement des 1 dans ma solution pour la recherche aléatoire...
+# Je ne sais pas si c'est possible de faire autrement pour une recherche aléatoire...
+# Pour la variante, voir note ci-bas
+# #######################
+
+INPUT_DATA_FILE_PATH  =  "data"
+INPUT_FILE_RDS_       = "Q2_large_interproblem_adjacency_matrix.rds"
+
+matrice <- import_single_rds(INPUT_DATA_FILE_PATH,INPUT_FILE_RDS_)
+
+# P1
+mInter <- matrice
+
+# Une fonction de recherche aléatoire avec une probabilité uniforme sur le domaine des variables
+random_search <- function(domains,
+                          max_iterations = 100,
+                          is_sol_x_better_than_y,
+                          verbose = FALSE) {
+  
+  best_incumbent <- rep(1, length(domains))
+  best_incumbent_iteration <- 0
+  curr_iteration <- 1
+  # if ( verbose ) {
+  #   cat('Une nouvelle solution candidate est trouvée à litération ',
+  #   curr_iteration,
+  #   ':',
+  #   sum(best_incumbent),
+  #   ' boîtes noires\n')
+  # }
+  candidate <- rep(1, length(domains))
+  
+  for (curr_iteration in 1:max_iterations) {
+    
+    for (i in 1:length(domains)) {
+      candidate[i] <- sample(domains[[i]], 1)
+    }
+    
+    if(is_sol_x_better_than_y(candidate, best_incumbent)) {
+      
+      best_incumbent <- candidate
+      best_incumbent_iteration <- curr_iteration
+      
+      if ( verbose ) {
+        
+        cat('Une nouvelle solution candidate est trouvée à litération ',
+            curr_iteration,
+            ':',
+            sum(best_incumbent),
+            ' boîtes noires\n')
+      }
+    }
+    
+    curr_iteration <- curr_iteration + 1;
+  }
+  
+  best_status <- is_sol_feasible(best_incumbent)
+  
+  result <- list(best_sol = sum(best_incumbent),
+                 iteration = best_incumbent_iteration,
+                 status = best_status)
+  
+  return(result)
+}
+
+# Une fonction de recherche aléatoire avec une probabilité favorisant 0 (minimise le nombre de boîte)
+random_search_variant <- function(domains,
+                                  max_iterations = 1000,
+                                  is_sol_x_better_than_y,
+                                  verbose = FALSE) {
+  
+  best_incumbent <- rep(1, length(domains))
+  best_incumbent_iteration <- 0
+  curr_iteration <- 1
+  # if ( verbose ) {
+  #   cat('Une nouvelle solution candidate est trouvée à litération ',
+  #   curr_iteration,
+  #   ':',
+  #   sum(best_incumbent),
+  #   ' boîtes noires\n')
+  # }
+  candidate <- rep(1, length(domains))
+  
+  for (curr_iteration in 1:max_iterations) {
+    
+    for (i in 1:length(domains)) {
+      
+      # #####################
+      # Ici, si mean = 0.6, on obtient des solutions à la recherche sur large, car notre solution favorise l'obtention de 1 pour chaque case.
+      # Par contre on obtient de moins bonnes solutions pour huge4 dans le prochain numéro.
+      # À mean = 0.4, on répond à l'attente du prof, car on favorise un plus petit nombre de boîte et on obtient de meilleurs valeurs pour Huge4 (numéro 2.5)
+      # #####################
+      
+      
+      candidate[i] <- rnorm( 1,
+                        mean = 0.4,
+                        sd = 0.2) %>%
+                        round( digits = 0 )
+    }
+    
+    if(is_sol_x_better_than_y(candidate, best_incumbent)) {
+      
+      best_incumbent <- candidate
+      best_incumbent_iteration <- curr_iteration
+      
+      if ( verbose ) {
+        cat('Une nouvelle solution candidate est trouvée à litération ',
+        curr_iteration,
+        ':',
+        sum(best_incumbent),
+        ' boîtes noires\n')
+      }
+    }
+    
+    curr_iteration <- curr_iteration + 1;
+  }
+  
+  best_status <- is_sol_feasible(best_incumbent)
+  
+  result <- list(best_sol = sum(best_incumbent),
+                 iteration = best_incumbent_iteration,
+                 status = best_status)
+  
+  return(result)
+}
+
+
+domains <- rep( list(0:1), nrow(matrice) )
+
+cat("Recherche aléatoire\n")
+return_value <- random_search(domains,
+                              max_iterations = 1000,
+                              is_sol_x_better_than_y = is_sol_x_better_than_y,
+                              verbose = TRUE)
+
+cat("\nVariante de la recherche aléatoire\n")
+return_value_variant <- random_search_variant(domains,
+                              max_iterations = 1000,
+                              is_sol_x_better_than_y = is_sol_x_better_than_y,
+                              verbose = TRUE)
+
+if(!return_value$status){
+  cat("\nLa solution de la recherche aléatoire n'est pas réalisable.\n\n")
+}else{
+  cat("\nLa solution de la recherche aléatoire est réalisable.\n",
+      "Voici la meilleure solution: ",
+      return_value[[1]],
+      " boîtes noires\n\n")
+}
+
+if(!return_value_variant$status){
+  cat("La solution de la variante de recherche aléatoire n'est pas réalisable.\n\n")
+}else{
+  cat("La solution de la variante de recherche aléatoire est réalisable.\n",
+      "Voici la meilleure solution: ",
+      return_value_variant[[1]],
+      " boîtes noires\n\n")
+}
+
+```
+
+## 2.5 Expérimentations
+
+Ici le code a été fait et le fichier créer. À noter que huge5 faisait planter mon système pour l'algorithme LPSOLVE... Donc, je l'ai retiré pour cet algorithme.
+
+```{r exp}
+
+experiment <- function(matrix_, instance_,  nb_runs_){
+  
+ 
+  
+  nb_runs <- nb_runs_
+  max_iterations = 100
+  algo_list = c('LPSOLVE', 'aleatoire', 'variante')
+  
+  experiments.cols.size = 9
+  
+  experiments.table <- tibble(algo     = rep("",experiments.cols.size),
+                              instance = rep("",experiments.cols.size),
+                              no_run   = rep(0,experiments.cols.size),
+                              time_sec = rep(0,experiments.cols.size),
+                              obj_val  = rep(0,experiments.cols.size),
+                              optimal  = rep(FALSE,experiments.cols.size),
+                              realisable = rep(FALSE, experiments.cols.size))
+  set.seed(45378)
+  current_experiment <- 1
+  mInter <- matrix_
+  MaxBoite <- 1
+  MinBoite <- 0
+  
+  for (algo in algo_list){
+    for (curr_run in 1:nb_runs) {
+      
+      domains <- rep(list(0:1), nrow(matrix_))
+      tic(quiet = TRUE) # Demarrer le timer
+      
+      if(algo == 'aleatoire'){
+        return_value <- random_search(domains,
+                                      max_iterations = max_iterations,
+                                      is_sol_x_better_than_y =
+                                        is_sol_x_better_than_y,
+                                      verbose = FALSE)
+        this_value = return_value$best_sol
+        
+      }
+      
+     
+      
+      if(algo == 'LPSOLVE'  ){
+        
+        opt_value = -1
+        if (instance_ == 'huge5') {
+           this_value = NA
+        }else  {
+        
+          opt_problem <- model_coverage_dom_set(matrix_)
+        
+          opt_result <- CVXR::psolve(opt_problem$problem,
+                                   solver = 'LPSOLVE',
+                                   verbose = FALSE)
+          this_value = opt_result$value
+        
+          
+          if(opt_result$status == "optimal") opt_value = this_value
+         
+        }  
+      }
+      
+      if (algo == 'variante'){
+        return_value <- random_search_variant(domains,
+                                              max_iterations = max_iterations,
+                                              is_sol_x_better_than_y =
+                                                is_sol_x_better_than_y,
+                                              verbose = FALSE)
+        
+        this_value = return_value$best_sol
+        
+      }
+      
+      chrono <- toc(quiet = TRUE) # arreter le timer
+      opt_status <- (opt_value == this_value)
+      status <- (0 < this_value && !is.na(opt_value))
+      
+      experiments.table$algo[current_experiment] <- algo
+      experiments.table$instance[current_experiment] <- instance_
+      experiments.table$no_run[current_experiment] <- curr_run
+      experiments.table$time_sec[current_experiment] <- (chrono$toc - chrono$tic)
+      experiments.table$obj_val[current_experiment] <- this_value
+      experiments.table$optimal[current_experiment] <- opt_status
+      experiments.table$realisable[current_experiment] <- status
+      current_experiment <- current_experiment + 1
+    }
+  }
+  
+  results <- experiments.table
+  return(results)
+
+}
+
+
+   
+  experiments_rds_filename = 'data/experiments.rds'
+  INPUT_DATA_FILE_PATH  =  "data"
+  
+  files = c('Q2_huge1_interproblem_adjacency_matrix.rds',
+            'Q2_huge2_interproblem_adjacency_matrix.rds',
+            'Q2_huge3_interproblem_adjacency_matrix.rds',
+            'Q2_huge4_interproblem_adjacency_matrix.rds',
+            'Q2_huge5_interproblem_adjacency_matrix.rds')
+  
+  instances = c('huge1','huge2','huge3','huge4','huge5')
+  current_experiment_ = c(1,10,19,28,37)
+  MaxBoite <- 1
+  MinBoite <- 0
+  nb_runs = 3
+  
+  experiments.cols.size = 45 # nb_runs = 3   * nb_files = 5 * nb_algorithms = 3
+  experiments.table <- tibble(algo     = rep("",experiments.cols.size),
+                              instance = rep("",experiments.cols.size),
+                              no_run   = rep(0,experiments.cols.size),
+                              time_sec = rep(0,experiments.cols.size),
+                              obj_val  = rep(0,experiments.cols.size),
+                              optimal  = rep(FALSE,experiments.cols.size),
+                              realisable = rep(FALSE, experiments.cols.size))
+  
+  
+  if(file.exists(experiments_rds_filename)) {
+    experiments.table <- import_single_rds(INPUT_DATA_FILE_PATH,"experiments.rds")
+    print("Le fichier experiment.rds avait été déjà créé!")
+  } else{
+      print("Le fichier experiment.rds n'existe pas. Génération du fichier experiment.rds! ")
+      for (rds in 1:length(files)) {
+        matrix_ <- import_single_rds(INPUT_DATA_FILE_PATH,files[rds])
+        mInter <- matrix_
+        instance_ <- instances[rds]
+        e <- experiment (matrix_ , instance_, nb_runs)
+        current_experiment = current_experiment_[rds]
+        for ( x in 1:nrow(e)){
+          experiments.table$algo[current_experiment] <- e$algo[x]
+          experiments.table$instance[current_experiment] <- e$instance[x]
+          experiments.table$no_run[current_experiment] <-  e$no_run[x]
+          experiments.table$time_sec[current_experiment] <- e$time_sec[x]
+          experiments.table$obj_val[current_experiment] <- e$obj_val[x]
+          experiments.table$optimal[current_experiment] <- e$optimal[x]
+          experiments.table$realisable[current_experiment] <- e$realisable[x]
+          current_experiment = current_experiment + 1
+        }
+      } 
+      print("Le fichier experiment.rds vient d'être créé")
+      saveRDS(experiments.table,experiments_rds_filename)
+
+}
+View(experiments.table)  
+
+```
+
+## 2.6 Comparaison des algorithmes
+
+```{r comparaison}
+# by_instance <- group_by(experiments, algo, instance)
+# value_table <- summarise( by_instance, time = mean(time_sec), value = mean(obj_val) )
+# value_table
+# 
+# ggplot(data = value_table, aes(x = instance, y = value, colour = algo)) +
+#   geom_line()
+```

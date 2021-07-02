@@ -1,0 +1,910 @@
+---
+title: "EQ6_TP2_Q1_analyse"
+author: 
+    -  Antonio Collante Caro (111 227 429)
+    -  Luc Grenier (902 201 689)
+output: 
+  html_document  :
+    numbersections: true
+    pagetitle: "Équipe 6, Travaux pratiques 2, Question 1"
+    toc: true
+date: "16 décembre 2019"
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+#will clear all objects includes hidden objects.
+rm(list = ls(all.names = TRUE)) 
+gc()
+
+
+
+library(tidyverse)
+library(RSQLite)
+library(DBI)
+
+# mydb <- dbConnect(RSQLite::SQLite(),
+#                   'db_nycflight13_original.sqlite')
+
+##=========================================================================================
+##  Function to read all the cvs files and load the content into a tibble data structure
+##=========================================================================================
+import_single_cvs <- function ( file_path_, file_name_  ){
+  
+  full_path_ <- file.path ( file_path_ , file_name_ ) 
+  
+  file_ = read.csv(full_path_)
+  print(full_path_)
+  return( file_ )
+}
+##=========================================================================================
+
+
+```
+
+# 1 Persistance des données
+
+Comme mentionné dans l'énoncé, nous devons créer une BD SQLite intègre à partir des fichiers qui contiennent le résultat d'une recherche sur les compagnies aux États-Unis et au Canada.
+
+## 1.1 Base de données intègre: ménage pour rendre le tout intègre
+Dans cette sous-section, nous devions prétraiter les données avant de créer une BD SQLite. 
+
+### Charger les données du fichier Q1_categories.csv
+
+```{r charger_donnes_category}
+
+INPUT_DATA_FILE_PATH  <-  "data"
+INPUT_FILE_Q1_CATEGORIES_CSV_  <- "Q1_categories.csv"
+
+# load a single cvs file
+data_cat <- import_single_cvs ( INPUT_DATA_FILE_PATH, INPUT_FILE_Q1_CATEGORIES_CSV_)     
+
+# Check out for missing explicit values
+count.is.na_ <- data_cat %>% summarize(na_count = sum(is.na(.)))  
+ 
+# Check duplicate for the Primary Key
+count.primary.key_ <-  data_cat %>%
+                         count(category) %>%
+                         filter(n > 1)   %>%
+                         nrow()
+
+ # Check the data type from the import                           
+ column.data.type_ <- data_cat %>% map(typeof)
+
+
+```
+
+Affichage des 5 premiers enregistrements dans <strong> _data_cat_ </strong>. Le type de colonne est en nombre entier tel qu'illustré ci-contre:
+
+```{r echo = FALSE}
+
+ str(  head(data_cat, 5)    )
+ head(data_cat, 5)
+ 
+```
+
+
+Après le <strong> chargement </strong>, les données manquantes concernant la clé primaire:
+
+- Données manquantes: `r count.is.na_`  </br>
+Pour la colonne _category_ en tant que clé primaire, il faudrait donc qu'il n'y ait pas de valeurs nulles (NA). Nous avons décidé de supprimer les NA's pour les données suivantes :
+
+```{r echo = FALSE}
+
+  data_cat %>% select(everything()) %>%  
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+
+- Nombre de doublons: `r count.primary.key_` </br>
+Également, pour la colonne _category_ en tant que clé primaire, il faudrait donc qu'il n'y ait pas de valeurs en doubles. Nous avons décidé de supprimer les doublons pour les données affichées ci-dessous:
+
+```{r echo = FALSE}
+
+data_cat %>% select_all() %>% 
+             count(category) %>% 
+             filter( n > 1) 
+
+```
+
+- Les types de données pour _data_cat_ sont: `r column.data.type_` </br>
+```{r echo = FALSE}
+  data_cat %>% map(typeof)
+```
+
+### Préparation des données dans data_cat
+```{r echo = FALSE}
+  
+  # If a new data file is used having NA elements 
+  data_cat <- drop_na (data_cat)  
+  
+  # Remove the duplicate from the table
+  data_cat <- data_cat %>% distinct()  
+
+  # Check out for missing explicit values 
+  count.is.na_ = data_cat %>% summarize(na_count = sum(is.na(.)))  
+  
+  # Check duplicate for the Primary Key
+  count.primary.key_ <- data_cat %>%
+                            count(category) %>%
+                            filter(n > 1) %>%
+                            nrow()
+  
+  # Switch the current data type (Integer) to Character data type
+  data_cat <- data_cat %>% mutate(category = as.character(category))
+  
+  # Check the data type for the column(s) or field(s)
+  column.data.type_ <- data_cat %>% map(typeof)
+  
+  # Sort the data in data_cat in descending order
+  data_cat <- data_cat %>% select_all() %>% arrange(category, desc(category) ) 
+  
+```
+
+Après la <strong> préparation </strong>, les données sont cohérentes dans <strong> _data_cat_ </strong>  concernant la clé primaire, tel qu'illustrer ci-contre:
+
+- Données manquantes : `r count.is.na_` </br>
+
+Nous avons supprimé les valeurs NA comme mentionnées auparavant dans la session de chargement de données.
+```{r echo = FALSE}
+
+  data_cat %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+- Nombre de doublons  : `r count.primary.key_` </br> 
+
+Nous avons aussi supprimé les valeurs en doublons comme mentionnées auparavant dans la session de chargement de données
+```{r echo = FALSE}
+
+data_cat %>% select_all() %>% 
+             count(category) %>% 
+             filter( n > 1) 
+
+```
+
+- Le type de donnée pour _data_cat_ sont: `r column.data.type_`. </br>
+```{r echo = FALSE}
+  data_cat %>% map(typeof)
+```
+
+- Affichage des 5 premiers enregistrements :
+
+```{r echo = FALSE}
+
+ str(head (data_cat, 5 ))
+ head (data_cat, 5 )
+ 
+```
+
+### Charger les données du fichier Q1_locations.csv
+
+```{r charger_donnes_locations}
+
+INPUT_DATA_FILE_PATH  <-  "data"
+INPUT_FILE_Q1_LOCATIONS_CSV_   <- "Q1_locations.csv"
+
+# Load a single cvs file
+data_loc <- import_single_cvs ( INPUT_DATA_FILE_PATH, INPUT_FILE_Q1_LOCATIONS_CSV_)             
+
+# Check out for missing explicit values
+count.is.na_ <- data_loc %>% summarize(na_count = sum(is.na(.)))  
+
+# Check duplicate for the Primary Key
+count.primary.key_  <- data_loc %>% 
+                       select(city, state) %>% 
+                       count(city, state)  %>% 
+                       filter( n > 1)      %>% 
+                       nrow()
+
+# Check the data type from the import                           
+column.data.type_ <- data_loc %>% map(typeof)
+
+
+```
+
+Affichage des 5 premiers enregistrements dans <strong> _data_loc_ </strong>. Le type de colonne est en nombre entier tel qu'illustrer ci-contre:
+
+```{r echo = FALSE}
+
+ str(head(data_loc,5))
+ head(data_loc,5)
+ 
+```
+Après le <strong> chargement </strong>, les données manquantes concernant la clé primaire:
+
+- Données manquantes: `r count.is.na_`  </br>
+```{r echo = FALSE}
+
+  data_loc %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+Tel que nous pouvons constater suite à l'affichage ci-dessus, il n'existe pas de valeurs nulles pour le tupple _city_ et _state_.
+
+- Nombre d'enregistrement en doublons: `r count.primary.key_` </br>
+```{r echo = FALSE}
+
+data_loc %>% select(city, state) %>% 
+             count(city, state) %>% 
+             filter( n > 1) 
+
+```  
+Tel que nous pouvons constater suite à l'affichage ci-dessus, il existe ded valeurs en doublons pour le tupple _city_ et _state_. Il faudrait les traiter pour rendre les données cohérentes.
+
+- Les types de données pour _data_loc_ sont: `r column.data.type_` </br>
+```{r echo = FALSE}
+  data_loc %>% map(typeof)
+```
+
+### Préparation des données dans data_loc
+
+```{r echo = FALSE}
+  
+  # Remove the duplicate from the table
+  data_loc <- data_loc %>% distinct()                              
+
+  # Check out for missing explicit values 
+  count.is.na_ <- data_loc %>% summarize(na_count = sum(is.na(.)))  
+
+  
+  # Switch the current data type (Integer) to Character data type 
+  data_loc <-  data_loc %>% mutate( city  = as.character(city) ,   
+                                    state = as.character(state) )
+ 
+ # Sort the data in data_cat in descending order
+ data_loc <- data_loc %>% arrange(city,state) 
+
+ # Create the Primary Keys for each record
+ data_loc <- data_loc %>% mutate(location_id = row_number())
+ 
+ # Check duplicate for the Primary Key
+ count.primary.key_ <- data_loc  %>%
+                             count(location_id) %>%
+                             filter(n > 1)      %>%
+                             nrow()
+ 
+ # Check duplicate for the row or record
+ count.primary.rows_ <- data_loc %>% 
+                          select(city, state) %>% 
+                          count(city, state) %>% 
+                          filter( n > 1)  %>% 
+                          nrow()
+ 
+ # Check the data type from the import 
+ column.data.type_ <- data_loc %>% map(typeof)
+  
+ # Re-assign the data, but putting location_id as the first column (variable)
+ data_loc <- data_loc %>% select(location_id, city, state)
+  
+```
+ 
+
+Lors de l'importation, nous avons remarqué l'absence de la colonne <strong> _location_id_ </strong>. Nous avons ajouté la colonne manquante pour s'assurer que les données de <strong> _data_loc_ </strong> respectent le schéma de la Figure 2 de l'enoncé. Nous avons utilisé la commande mutate:  _data_loc <- data_loc %>% mutate(location_id = row_number())_.
+
+Après la <strong> préparation </strong>, les données dans <strong> _data_loc_ </strong> sont cohérentes concernant la clé primaire, tel qu'illustré ci-contre:
+
+- Données manquantes : `r count.is.na_` </br>
+```{r echo = FALSE}
+
+  data_loc %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+- Nombre de doublons  : `r count.primary.key_` </br> 
+```{r echo = FALSE}
+   data_loc %>% select(location_id, city, state) %>% 
+              count(location_id, city, state) %>% 
+              filter( n > 1) 
+```  
+
+- Les types de donnée pour _data_loc_ sont: `r column.data.type_`. </br>
+```{r echo = FALSE}
+   data_loc %>% map(typeof)
+```
+- Doublons pour chacun d'enregistrements (city,state): `r count.primary.rows_` </br>
+
+```{r echo = FALSE}
+   data_loc %>% select(city, state) %>% 
+              count(city, state) %>% 
+              filter( n > 1) 
+```  
+
+- Affichage des 5 premiers enregistrements :
+
+```{r echo = FALSE}
+
+ str(head (data_loc, 5 ))
+ head (data_loc, 5 )
+ 
+```
+
+
+### Charger les données du fichier Q1_types.csv
+
+```{r charger_donnes_types}
+
+INPUT_DATA_FILE_PATH  <-  "data"
+INPUT_FILE_Q1_TYPES_CSV_      <- "Q1_types.csv"
+
+# Load a single cvs file
+data_typ <- import_single_cvs ( INPUT_DATA_FILE_PATH, INPUT_FILE_Q1_TYPES_CSV_)             
+
+# Check out for missing explicit values
+count.is.na_ <- data_typ %>% summarize(na_count = sum(is.na(.)))  
+
+# Check duplicate for the Primary Key
+count.primary.key_  <- data_typ %>%
+                       select(type) %>%
+                       count(type)  %>%
+                       filter( n > 1)      %>%
+                       nrow()
+
+# Check the data type from the import                           
+column.data.type_ <- data_typ %>% map(typeof)
+
+```
+
+Affichage des 5 premiers enregistrements dans <strong> _data_typ_ </strong>. Le type de colonne est en nombre entier tel qu'illustré ci-contre:
+
+```{r echo = FALSE}
+ 
+ str(head(data_typ, 5))
+ head(data_typ, 5)
+ 
+```
+
+Après le <strong> chargement </strong>, les données manquantes concernant la clé primaire:
+
+- Données manquantes: `r count.is.na_`  </br>
+```{r echo = FALSE}
+
+  data_typ %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+- Nombre de doublons: `r count.primary.key_` </br>
+
+```{r echo = FALSE}
+   data_typ %>% select(type) %>% 
+              count(type) %>% 
+              filter( n > 1) 
+```  
+
+- Les types de donnée pour _data_typ_ sont: `r column.data.type_` </br>
+```{r echo = FALSE}
+  data_typ %>% map(typeof)
+```
+
+### Préparation des données dans data_typ
+```{r echo = FALSE}
+  
+  # Sort the columns by type
+  data_typ <- data_typ %>% arrange(type, -description)
+  
+  # Remove the duplicate from the table
+  data_typ <- data_typ[!duplicated(data_typ$type),]
+
+  # Check out for missing explicit values 
+  count.is.na_ = data_typ %>% summarize(na_count = sum(is.na(.)))  
+
+  # Switch the current data type (Integer) to Character data type 
+  data_typ <-  data_typ %>% mutate( type  = as.character(type) ,   
+                                    description = as.character(description) )
+ 
+ # Sort the data in data_cat in descending order
+ data_typ <- data_typ %>% arrange( type, description) 
+
+ # Check duplicate for the Primary Key
+ count.primary.key_ <- data_typ  %>%
+                             count(type) %>%
+                             filter(n > 1)      %>%
+                             nrow()
+ 
+ # Check the data type from the import 
+ column.data.type_ <- data_typ %>% map(typeof)
+ 
+ 
+ 
+```
+
+Après la <strong> préparation </strong>, les données dans <strong> _data_typ_ </strong> sont cohérentes concernant la clé primaire, tel qu'illustré ci-contre:
+
+- Données manquantes : `r count.is.na_` </br>
+```{r echo = FALSE}
+
+  data_typ %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+- Nombre de doublons  : `r count.primary.key_` </br> 
+```{r echo = FALSE}
+   data_typ %>% select(type) %>% 
+              count(type) %>% 
+              filter( n > 1) 
+```  
+
+- Les types de donnée pour _data_typ_ sont: `r column.data.type_` </br>
+```{r echo = FALSE}
+  data_typ %>% map(typeof)
+```
+
+- Affichage des 5 premiers enregistrements :
+
+```{r echo = FALSE}
+
+  str(head (data_typ, 5 )) 
+  head (data_typ, 5 )
+  
+```
+
+
+### Charger les données du fichier Q1_companies.csv
+```{r charger_donnes_companies}
+
+# list.columns.data.com = c('name' ,'url' ,'year_founded' , 
+#                            'city' ,'state' ,'full_time_employees' ,
+#                            'type' ,'company_category' ,'revenue_source' ,
+#                            'business_model')
+
+INPUT_DATA_FILE_PATH  <-  "data"
+INPUT_FILE_Q1_COMPANIES_CSV_   <- "Q1_companies.csv"
+
+# Load a single cvs file
+data_com <- import_single_cvs ( INPUT_DATA_FILE_PATH, INPUT_FILE_Q1_COMPANIES_CSV_ )             
+
+
+# Check out for missing explicit values
+count.is.na_ <- data_com %>% summarize(na_count = sum(is.na(.)))  
+
+
+
+# Check duplicate for the Primary Key
+count.primary.key_  <- data_com %>% count(name ,
+                                        url ,
+                                        year_founded ,
+                                        city ,state ,
+                                        full_time_employees ,
+                                        type ,
+                                        company_category ,
+                                        revenue_source ,
+                                        business_model) %>%
+                                        filter( n > 1)  %>%
+                                        nrow()
+
+# Check the data type from the import                           
+column.data.type_ <- data_com %>% map(typeof)
+
+```
+
+Affichage des 5 premiers enregistrements dans <strong> _data_com_ </strong> tel qu'illustré ci-contre:
+
+```{r echo = FALSE}
+
+ str( head(data_com,5) )
+ head( data_com, 5 ) 
+  
+ 
+```
+Après le <strong> chargement </strong>, les données manquantes concernant la clé primaire:
+
+- Données manquantes: `r count.is.na_`  </br>
+- Tel que nous pouvons constater dans les affichages ci-dessous, les variables  ou les colonnes qui possèdent des NA sont: _name_, _year_founded_, _city_, _full_time_employees_, _type_, _company_category_  et _business_model_. Donc, ce sont des données manquantes qui n'auront aucun impact lors de l'importation dans la base de données, mais il est toutefois possible que celles-ci soient des clés étrangères. Malgré tout, nous considérons qu'aucun traitement additionnel n'est requis pour les NA dans _data_com_.
+
+```{r echo = FALSE}
+
+  data_com %>% select(everything()) %>%  # replace to your needs
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+- Nombre d'enregistrements en doublons: `r count.primary.key_` </br>
+
+```{r echo = FALSE}
+ # Check duplicate for the Primary Key
+count.primary.key_  <- data_com %>% count(name ,
+                                        url ,
+                                        year_founded ,
+                                        city ,state ,
+                                        full_time_employees ,
+                                        type ,
+                                        company_category ,
+                                        revenue_source ,
+                                        business_model) %>%
+                                        filter( n > 1)  %>%
+                                        nrow()
+
+```  
+
+- Les types de données pour les champs sont: `r column.data.type_` 
+
+```{r echo = FALSE}
+  data_com %>% map(typeof)
+```
+</br>
+
+Suite à l'importation des données _companies_, nous avons remarqué l'absence: </br>
+- de la clé primaire: <strong> _id_ </strong> </br>
+- de champ  <strong> _location_id_ </strong>. Il faudrait dons associer le tuple: _city_ et _state_ à un _location_id_ dans la table R _data_loc_.
+
+
+### Préparation des données dans data_com
+```{r echo = FALSE}
+  
+  # Sort the columns by type
+  data_com <- data_com %>% arrange(name ,
+                                   url ,
+                                   year_founded ,
+                                   city ,state ,
+                                   full_time_employees ,
+                                   type ,
+                                   company_category ,
+                                   revenue_source ,
+                                   business_model)
+  
+  # Add a new columns id that will be the pk
+  data_com <- data_com %>% mutate(id = row_number())
+  
+  
+  
+   # Place the id (pk) at the first place on the data table
+   data_com <- data_com %>% select(id,
+                                   name ,
+                                   url ,
+                                   year_founded ,
+                                   city ,state ,
+                                   full_time_employees ,
+                                   type ,
+                                   company_category ,
+                                   revenue_source ,
+                                   business_model)
+  # Check out that pk is unique
+  count.primary.key_  <- data_com %>% count(id) %>%
+                                      filter( n > 1)  %>%
+                                      nrow()
+  
+  # Check out for missing explicit values
+  count.is.na_ <- data_com %>% summarize(na_count = sum(is.na(.))) 
+  
+  # Check out the new data type after the mutate
+  column.data.type_ <- data_com %>% map(typeof)
+ 
+```
+
+
+Après la <strong> préparation </strong>, les données dans <strong> _data_com_ </strong> sont cohérentes concernant la clé primaire, tel qu'illustré ci-contre:
+
+- Données manquantes : `r count.is.na_`. </br> 
+
+Après les traitements de données, nous avons vérifié qu'il n'existait pas de valeurs nulles (NA) additionnelles (à ceux identifiés auparavant dans la session de chargement de données).
+
+Il faut tenir compte que si les enregistrements pour lesquels la valeur de _city_  ou _state_ ou le deux sont égale à NA ou nulles, on sera dans l'impossibilité de faire un « match 1:1 » pour la clé étrangère vers la table _locations_ , il faudrait donc assigner des valeurs nulles en tant que clé étrangère pour ces enregistrements.
+
+```{r echo = FALSE}
+
+  data_com %>% select(everything()) %>% 
+                  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+- Nombre d'enregistrements en doublons pour la nouvelle colonne </strong> _id_ </strong>: `r count.primary.key_` </br> 
+
+```{r echo = FALSE}
+   data_com %>% select(id) %>% 
+                 count(id) %>% 
+                 filter( n > 1) 
+```  
+
+- Les types de données pour pour les champs sont: `r column.data.type_` </br>
+
+Affichage des 5 premiers enregistrements dans <strong> _data_com_ </strong> tel qu'illustré ci-contre:
+
+```{r echo = FALSE}
+
+ str( head(data_com, 5) )
+ head( data_com, 5)
+  
+```
+
+-Ajout de la colonne _location_id_ à partir du tuple _city_ et _state_. 
+```{r echo = FALSE}
+ 
+ # Check out city and state in data_com
+ new.col.location_id <- data_com %>% 
+                         left_join(data_loc, by = c('city','state')) %>%
+                         select( id,
+                                 name ,
+                                 url ,
+                                 year_founded ,
+                                 city ,
+                                 state ,
+                                 full_time_employees ,
+                                 type ,
+                                 company_category ,
+                                 revenue_source ,
+                                 business_model, 
+                                 location_id
+                                )
+
+ new.col.location_id %>% select(id, city, state, location_id) %>% 
+                         summarise_all(list(~ sum(is.na(.))))
+ 
+ new.col.location_id %>% select(id, city, state, location_id)  %>% 
+                         filter( !is.na(city) & is.na(location_id))
+ 
+ # Creation of data_com original to compare to the SQLs for the question 1.4
+ data_com_ori <- data_com
+ 
+ 
+ # new data_com having the location_id
+ data_com <- new.col.location_id %>% 
+                            select(id,
+                                 name ,
+                                 url ,
+                                 year_founded ,
+                                 full_time_employees ,
+                                 type ,
+                                 company_category ,
+                                 revenue_source ,
+                                 business_model, 
+                                 location_id
+                                 )
+ 
+
+ # Check out that pk is unique
+  count.primary.key_  <- data_com %>% count(id) %>%
+                                      filter( n > 1)  %>%
+                                      nrow()
+  
+  # Check out for missing explicit values
+  count.is.na_ <- data_com %>% summarize(na_count = sum(is.na(.))) 
+  
+  # Swtich data type integers to characters
+  data_com <-  data_com %>%
+                  mutate( name =  as.character(name),
+                          url  =  as.character(url),
+                          year_founded =  as.integer(year_founded),
+                          full_time_employees =  as.character(full_time_employees),
+                          type =  as.character(type),
+                          company_category =  as.character(company_category),
+                          revenue_source =  as.character(revenue_source),
+                          business_model =  as.character(business_model) )
+  
+
+```
+Suite à l'exécution de la jointure _left_join(data_loc, by = c('city','state'))_, on peut constater (à l'affichage ci-dessus) des cas où le tuple _city_ et _state_ n'a pas de valeurs nulles, mais aucune valeur _location_id_ n'a été trouvée. Nous avons observé rapidement les données, cela pourrait être le résultat des erreurs de _typo_. Nous avons décidé de laisser les données tel qu'elles ont été importées.
+
+Pour les valeurs nulles dans le champ _city_, nous n'ajouterons pas une clé étrangère (comme nous avons mentionné avant).
+
+- Nous avons vérifié que toutes les catégories de _data_com_ se trouvaient dans _data_cat_. Dans ce cas-ci, la valeur nulle signifie qu'il n'y a pas de lien vers la table _category_.
+
+```{r echo = FALSE}
+ # Check out if all the caterogies in data_com are found in categories
+ data_com %>% 
+        anti_join( data_cat, by = c('company_category' = 'category')) %>% 
+        select(company_category) %>% 
+        distinct() 
+        
+```  
+
+- Nous avons vérifié que tous les types de _data_com_ se trouvaient dans _data_typ_. Il est évident qu'il existe des _types_ qui ne se trouvent pas dans la table _types_, il faudrait apporter des corrections pour éviter des enjeux lors de la création de la clé étrangère.
+
+```{r echo = FALSE}
+ 
+ # Check out if all the types in data_com are found in types
+ data_com.temp <- data_com %>% 
+                    anti_join( data_typ, by = c('type') ) %>% 
+                    select(type) %>% 
+                    distinct()   %>% 
+                    filter(!is.na(type)) 
+data_com.temp
+```
+
+L'affichage ci-dessus montre les _types_ qui sont dans _data_com_, mais pas dans _data_type_, il faudrait donc les ajouter dans _data_typ_ pour faciliter la création des clés étrangère. Vu que nous n'avons que les données pour la colonne _type_, nous avons employé comme stratégie d'inclure, pour la colonne _description_ dans _data_typ_, les mêmes données de _type_ afin d'éviter des NA pour les descriptions.
+
+```{r echo = FALSE}
+list.type <- data_com.temp
+list.desc <- data_com.temp
+names(list.desc)[1] <- 'description'
+
+
+data_typ  <- data_typ %>%
+             bind_rows(c(list.type,list.desc))
+
+
+```  
+
+- Suite à l'ajout de _types_ manquantes dans _data_typ_:
+```{r echo = FALSE}
+ # Check out if all the types in data_com are found in types
+ data_com %>% 
+        anti_join( data_typ, by = c('type') ) %>% 
+        select(type) %>% 
+        distinct() %>% 
+        filter(!is.na(type))
+
+```  
+
+- On s'assure qu'il n'y a pas d'enregistrements en doublons pour </strong> _id_ </strong> après l'ajout de la colonne _location_id_: `r count.primary.key_` </br> 
+
+```{r echo = FALSE}
+   data_com %>% select(id) %>% 
+              count(id) %>% 
+              filter( n > 1) 
+```  
+
+- Nous avons également vérifié qu'aucune valeur nulle additionnelle a été introduite après l'ajout de la colonne _location_id_ tel qu'afficher ci-dessous:  
+
+```{r echo = FALSE}
+
+  data_com %>% select(everything()) %>% 
+  summarise_all(list(~ sum(is.na(.))))
+
+```
+
+
+- Les types de données pour _data_com_ sont: `r column.data.type_` </br>
+```{r echo = FALSE}
+  data_com %>% map(typeof)
+```
+
+Après la <strong> préparation </strong>, les données dans <strong> _data_com_ </strong> sont cohérents concernant la clé primaire, tel qu'illustré ci-contre:
+
+```{r echo = FALSE}
+
+ str( head(data_com, 5 ))
+ head( data_com, 5 )
+  
+```
+
+## 1.2 Base de données: créez votre base de données
+
+### Créer les tables: categories, locations, types et companies
+```{r echo = TRUE}
+
+# Open a connection to SQLite
+mydb <- dbConnect(RSQLite::SQLite(),
+                  'EQ5_TP4_Q2.sqlite')
+
+sql.cat_ <- 'SELECT count(*) FROM sqlite_master WHERE type="table" AND name="categories"'
+sql.loc_ <- 'SELECT count(*) FROM sqlite_master WHERE type="table" AND name="locations"'
+sql.typ_ <- 'SELECT count(*) FROM sqlite_master WHERE type="table" AND name="types"'
+sql.com_ <- 'SELECT count(*) FROM sqlite_master WHERE type="table" AND name="companies"'
+
+# Create the tables from the data frames (imported data)
+if ( dbGetQuery(mydb, statement =  sql.cat_ ) == 0 ) dbWriteTable(mydb, "categories", data_cat)
+if ( dbGetQuery(mydb, statement =  sql.loc_ ) == 0 ) dbWriteTable(mydb, "locations", data_loc)
+if ( dbGetQuery(mydb, statement =  sql.typ_ ) == 0 ) dbWriteTable(mydb, "types", data_typ)
+if ( dbGetQuery(mydb, statement =  sql.com_ ) == 0 ) dbWriteTable(mydb, "companies", data_com)
+
+# 
+
+
+```
+
+### Validation après la création des tables
+
+D'abord, nous avons constaté si les tables ont été bien créées
+
+```{r echo = FALSE}
+dbListTables(mydb)
+```
+
+On affiche quelques enregistrements pour la table _categories_:
+```{r echo = FALSE}
+  
+    sql.cat_ <- dbGetQuery(mydb, statement = 'SELECT * FROM categories;')
+    head( sql.cat_, 3)
+```
+
+On affiche quelques enregistrements pour la table _locations_:
+```{r echo = FALSE}
+  
+    sql.loc_ <- dbGetQuery(mydb, statement = 'SELECT * FROM locations;')
+    head( sql.loc_, 3)
+```
+
+On affiche quelques enregistrements pour la table _types_:
+```{r echo = FALSE}
+  
+    sql.typ_ <- dbGetQuery(mydb, statement = 'SELECT * FROM types;')
+    head( sql.typ_, 3)
+```
+
+On affiche quelques enregistrements pour la table _companies_:
+```{r echo = FALSE}
+  
+    sql.com_ <- dbGetQuery(mydb, statement = 'SELECT * FROM companies;')
+    head( sql.com_, 3)
+```
+
+## 1.3 Base de données: configurez la base de données
+
+Les scripts de création de tables ont été générés par SQLite lors de la configuration de la base de données.
+
+```{r echo = TRUE, eval = FALSE}
+<font size=2">
+
+CREATE TABLE "categories" (          
+	"category"	TEXT NOT NULL UNIQUE,  
+	PRIMARY KEY("category")            
+);                                   
+
+CREATE TABLE "locations" (                                          
+	"location_id"	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,  
+	"city"	TEXT,                                                     
+	"state"	TEXT                                                      
+);                                                                  
+
+CREATE TABLE "types" (                  
+	"type"	TEXT NOT NULL UNIQUE,         
+	"description"	TEXT NOT NULL UNIQUE,   
+	PRIMARY KEY("type")                   
+);                                      
+
+"CREATE TABLE "companies" (                                 
+	"id"	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,  
+	"name"	TEXT,                                             
+	"url"	TEXT,                                               
+	"year_founded"	INTEGER,                                  
+	"full_time_employees"	TEXT,                               
+	"type"	TEXT,                                             
+	"company_category"	TEXT,                                 
+	"revenue_source"	TEXT,                                   
+	"business_model"	TEXT,                                   
+	"location_id"	INTEGER,                                    
+	FOREIGN KEY("type") REFERENCES "types"("type") ON DELETE SET NULL,                        
+	FOREIGN KEY("company_category") REFERENCES "categories"("category") ON DELETE SET NULL,   
+	FOREIGN KEY("location_id") REFERENCES "locations"("location_id") ON DELETE SET NULL       
+);                                                                                          
+
+</font>
+```
+
+## 1.4 Requêtes sur votre nouvelle base de données
+
+#### toutes les compagnies (noms et url) fondées entre 1999 et 2001 ordonnées par nom
+
+```{r echo = TRUE}
+  
+    sql.com_ <- dbGetQuery(mydb, statement = 'SELECT NAME, URL 
+                                              FROM companies 
+                                              WHERE year_founded BETWEEN 1999 AND 2001 ORDER BY NAME;')
+    
+    # SQL result 
+    sql.com_
+    
+    # Filtre sur le data frame 
+    data_com_ori %>% select(name, url, year_founded) %>% filter( year_founded >= 1999 & year_founded <= 2001 )
+```
+Le nombre d'enregistrements sortis lors de l'exécution de la requête SQL est exact à ceux obtenus en applicant un filtre sur _data_com_ori_ ce qui nous assure que nous avons bien appliqué les procédures pour rendre la base de données cohérente.
+
+#### Toutes les compagnies (noms, url, ville et année de fondation) en Orégon
+```{r echo = TRUE}
+  
+    sql.com_ <- dbGetQuery(mydb, statement = 'SELECT NAME, URL , city, year_founded
+                                              FROM companies LEFT JOIN locations 
+                                              WHERE companies.location_id = locations.location_id 
+                                                    AND (upper(state) = "OR" or lower(state) = "or");')
+    # SQL result
+    sql.com_
+    
+    # Filtre sur le data frame 
+    data_com_ori %>% select(name, url,city, year_founded, state) %>% filter(state == 'OR')
+```
+
+On s'aperçoit qu'il y a une différence entre le nombre d'enregistrements sortis lors de l'exécution de la requête SQL et celui en applicant un filtre sur _data_com_ori_. Ceci s'explique par le fait que la valeur dans _ville_ est nulle; donc dans ce cas-ci nous avons associé une valeur nulle pour _location_id_ lors de la création de la clé étrangère dans _data_com_
+
+```{r echo = FALSE}
+dbDisconnect(mydb)
+  
+```
